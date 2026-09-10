@@ -77,6 +77,7 @@ AcademicAI_RAG/
   1. *Vector Layer:* Distance threshold > 0.7 triggers automatic escalation
   2. *LLM Layer:* Model detects incomplete/partial context and triggers `ESCALATE:`
 - [x] Built `clean_text()` sanitizer to strip raw markdown codes, asterisks (`**`), backticks, and header hashes for clean academic English
+- [x] Added `extract_response_text()` helper to safely extract reasoning from thinking models (`qwen/qwen3.8-27b`), strip `<think>...</think>` blocks, and guard against empty LLM responses
 - [x] Verified automated tests (`test_rag.py`) for `.txt`, `.pdf`, and `.docx`
 - [x] Ingested user's real course notes:
   - `Introduction to Psychology.pdf` (49 chunks)

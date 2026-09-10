@@ -1,57 +1,59 @@
+"""
+ClassConnect CLI — Terminal Academic Assistant
+Interactive terminal interface for the ClassConnect Academic Intelligence API.
+Supports:
+  - PDF document ingestion (/upload)
+  - Socratic tutor Q&A (/ask-socratic)
+  - Emergency exam triage (/triage)
+"""
+
 import requests
+import json
 import sys
 import os
 
 BASE_URL = "http://localhost:8000"
 
 def print_banner():
-    print("=" * 60)
-    print("       Academic AI -- RAG Terminal Assistant")
-    print("=" * 60)
+    print("=" * 65)
+    print("       ClassConnect -- Academic Intelligence Terminal")
+    print("=" * 65)
 
-def ingest_file(file_path: str):
+def upload_pdf(file_path: str):
     if not os.path.exists(file_path):
         print(f"\n[!] Error: File '{file_path}' does not exist.")
         return False
     
-    ext = os.path.splitext(file_path)[1].lower()
-    if ext not in [".txt", ".pdf", ".docx"]:
-        print(f"\n[!] Error: Only .txt, .pdf, and .docx files are supported (got '{ext}').")
+    if not file_path.lower().endswith(".pdf"):
+        print(f"\n[!] Error: ClassConnect accepts PDF files only.")
         return False
     
-    if ext == ".pdf":
-        mime = "application/pdf"
-    elif ext == ".docx":
-        mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    else:
-        mime = "text/plain"
     filename = os.path.basename(file_path)
-    
     print(f"\n[*] Uploading and indexing '{filename}'...")
     try:
         with open(file_path, "rb") as f:
-            files = {"file": (filename, f, mime)}
-            res = requests.post(f"{BASE_URL}/ingest", files=files, timeout=60)
+            files = {"file": (filename, f, "application/pdf")}
+            res = requests.post(f"{BASE_URL}/upload", files=files, timeout=60)
             
         if res.status_code == 200:
             data = res.json()
-            print(f"[+] Success: Loaded {data.get('chunks_loaded', 0)} chunks from '{filename}'.")
+            print(f"[+] Success: {data.get('message')}")
             return True
         else:
-            print(f"[!] Ingestion failed ({res.status_code}): {res.text}")
+            print(f"[!] Upload failed ({res.status_code}): {res.text}")
             return False
     except requests.exceptions.ConnectionError:
-        print("\n[!] Error: Cannot connect to backend server at http://localhost:8000.")
-        print("    Make sure the server is running with: python main.py")
+        print("\n[!] Error: Cannot connect to ClassConnect server at http://localhost:8000.")
+        print("    Ensure the server is running with: python main.py")
         return False
 
-def ask_question(query: str):
-    if not query.strip():
+def ask_socratic(question: str):
+    if not question.strip():
         return
     
-    print(f"\n[*] Searching notes for: \"{query}\"...")
+    print(f"\n[*] Asking Socratic Tutor: \"{question}\"...")
     try:
-        res = requests.post(f"{BASE_URL}/ask", json={"query": query}, timeout=60)
+        res = requests.post(f"{BASE_URL}/ask-socratic", json={"question": question}, timeout=60)
         if res.status_code != 200:
             print(f"[!] Request failed ({res.status_code}): {res.text}")
             return
@@ -59,44 +61,82 @@ def ask_question(query: str):
         data = res.json()
         status = data.get("status")
         
-        if status == "answered":
-            print("\n" + "=" * 60)
-            print("ANSWER:")
-            print("=" * 60)
+        if status == "success":
+            print("\n" + "=" * 65)
+            print("SOCRATIC TUTOR GUIDANCE:")
+            print("=" * 65)
             print(data.get("answer"))
-            print("=" * 60)
-            citations = data.get("citations", [])
-            if citations:
-                print(f"Sources Cited: {', '.join(citations)}")
-            print("=" * 60 + "\n")
+            print("=" * 65)
+            sources = data.get("sources", [])
+            if sources:
+                print("\nContext Excerpts:")
+                for i, src in enumerate(sources, 1):
+                    print(f"  [{i}] {src.strip()}")
+            print("=" * 65 + "\n")
             
-        elif status == "escalated_to_teacher":
-            print("\n" + "=" * 60)
-            print("STATUS: ESCALATED TO TEACHER")
-            print("=" * 60)
-            print(f"Reason: {data.get('reason', 'Context incomplete')}")
-            citations = data.get("citations", [])
-            if citations:
-                print(f"Related Files: {', '.join(citations)}")
-            print("=" * 60 + "\n")
-            
+        elif status == "not_in_syllabus" or data.get("answer") == "ESCALATE":
+            print("\n" + "=" * 65)
+            print("STATUS: NOT IN SYLLABUS (ESCALATE)")
+            print("=" * 65)
+            print("This topic is not covered in your uploaded course notes.")
+            print("Escalating to instructor / syllabus materials.")
+            print("=" * 65 + "\n")
         else:
             print(f"\nResponse: {data}\n")
             
     except requests.exceptions.ConnectionError:
-        print("\n[!] Error: Cannot connect to backend server at http://localhost:8000.")
-        print("    Make sure the server is running with: python main.py")
+        print("\n[!] Error: Cannot connect to ClassConnect server at http://localhost:8000.")
+        print("    Ensure the server is running with: python main.py")
+
+def run_triage(subject: str, hours_left: int, weak_topics: list[str]):
+    print(f"\n[*] Running Emergency Exam Triage for '{subject}' ({hours_left}h left)...")
+    try:
+        payload = {
+            "subject": subject,
+            "hours_left": hours_left,
+            "weak_topics": weak_topics
+        }
+        res = requests.post(f"{BASE_URL}/triage", json=payload, timeout=60)
+        if res.status_code != 200:
+            print(f"[!] Triage failed ({res.status_code}): {res.text}")
+            return
+        
+        data = res.json()
+        plan = data.get("study_plan", {})
+        
+        print("\n" + "=" * 65)
+        print(f"EMERGENCY TRIAGE PLAN -- {subject.upper()} ({hours_left} HOURS LEFT)")
+        print("=" * 65)
+        
+        print("\n[1] HIGH YIELD CORE (Spend 70% of your time here):")
+        for item in plan.get("high_yield_core", []):
+            print(f"  * {item}")
+            
+        print("\n[2] QUICK WINS (Definitions and easy points):")
+        for item in plan.get("quick_wins", []):
+            print(f"  + {item}")
+            
+        print("\n[3] SKIP LIST (Low priority - omit to save time):")
+        for item in plan.get("skip_list", []):
+            print(f"  - {item}")
+            
+        print("=" * 65 + "\n")
+        
+    except requests.exceptions.ConnectionError:
+        print("\n[!] Error: Cannot connect to ClassConnect server at http://localhost:8000.")
+        print("    Ensure the server is running with: python main.py")
 
 def interactive_mode():
     print_banner()
     print("Commands:")
-    print("  /upload <path>   Upload and index a .txt, .pdf, or .docx file")
-    print("  /exit            Quit the program")
-    print("  Or simply type any question to ask your notes!\n")
+    print("  /upload <path.pdf>         Upload PDF lecture notes or syllabus")
+    print("  /triage                    Launch emergency exam triage generator")
+    print("  /exit                      Quit")
+    print("  Or simply type a question to get Socratic tutoring!\n")
     
     while True:
         try:
-            user_input = input("AcademicAI > ").strip()
+            user_input = input("ClassConnect > ").strip()
             if not user_input:
                 continue
             
@@ -106,30 +146,37 @@ def interactive_mode():
             
             if user_input.lower().startswith("/upload "):
                 file_path = user_input[8:].strip().strip('"').strip("'")
-                ingest_file(file_path)
+                upload_pdf(file_path)
             elif user_input.lower() == "/upload":
-                path = input("Enter path to .txt, .pdf, or .docx file: ").strip().strip('"').strip("'")
-                ingest_file(path)
+                path = input("Enter path to PDF file: ").strip().strip('"').strip("'")
+                upload_pdf(path)
+            elif user_input.lower() == "/triage":
+                subj = input("Subject: ").strip()
+                hrs = int(input("Hours left before exam: ").strip() or "4")
+                topics_raw = input("Weak topics (comma-separated): ").strip()
+                topics = [t.strip() for t in topics_raw.split(",") if t.strip()]
+                run_triage(subj, hrs, topics)
             else:
-                ask_question(user_input)
+                ask_socratic(user_input)
                 
         except (KeyboardInterrupt, EOFError):
             print("\n\nGoodbye!\n")
             break
 
 if __name__ == "__main__":
-    # If arguments are passed:
-    #   python cli.py ingest <filepath>
-    #   python cli.py ask "Your question"
     args = sys.argv[1:]
-    if len(args) >= 2 and args[0].lower() in ["ingest", "upload"]:
-        ingest_file(args[1])
+    if len(args) >= 2 and args[0].lower() == "upload":
+        upload_pdf(args[1])
     elif len(args) >= 2 and args[0].lower() == "ask":
-        ask_question(" ".join(args[1:]))
+        ask_socratic(" ".join(args[1:]))
+    elif len(args) >= 4 and args[0].lower() == "triage":
+        # python cli.py triage "Psychology" 3 "memory,conditioning"
+        run_triage(args[1], int(args[2]), [t.strip() for t in args[3].split(",")])
     elif len(args) == 1 and args[0].lower() in ["--help", "-h", "help"]:
         print("Usage:")
-        print("  python cli.py                       # Launch interactive terminal mode")
-        print("  python cli.py ingest <filepath>     # Upload and index a .txt, .pdf, or .docx")
-        print("  python cli.py ask \"<question>\"      # Query notes and get answer")
+        print("  python cli.py                                        # Interactive mode")
+        print("  python cli.py upload <file.pdf>                      # Upload PDF")
+        print("  python cli.py ask \"<question>\"                       # Socratic question")
+        print("  python cli.py triage <subject> <hours> <topics,...>  # Exam triage")
     else:
         interactive_mode()

@@ -1,6 +1,9 @@
 # ---- Secrets ----
 .env
 
+# ---- Persistent Vector DB ----
+chroma_db/
+
 # ---- Python ----
 __pycache__/
 *.py[cod]

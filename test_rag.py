@@ -1,3 +1,11 @@
+"""
+ClassConnect End-to-End Test Suite
+Tests all 3 endpoints of the ClassConnect Academic Intelligence API:
+1. POST /upload (PDF ingestion)
+2. POST /ask-socratic (In-scope Q&A + Out-of-scope escalation)
+3. POST /triage (Emergency exam study plan generation)
+"""
+
 import requests
 import time
 import sys
@@ -9,9 +17,9 @@ def wait_for_server(timeout=30):
     start = time.time()
     while time.time() - start < timeout:
         try:
-            r = requests.get(f"{BASE_URL}/docs", timeout=2)
+            r = requests.get(f"{BASE_URL}/", timeout=2)
             if r.status_code == 200:
-                print("Server is healthy and ready.")
+                print("ClassConnect Server is healthy and ready.")
                 return True
         except requests.exceptions.RequestException:
             pass
@@ -19,124 +27,79 @@ def wait_for_server(timeout=30):
     print("Timed out waiting for server.")
     return False
 
-def test_ingest():
-    print("\n--- Testing /ingest with notes/sample_notes_biology.txt ---")
-    filepath = os.path.join("notes", "sample_notes_biology.txt")
+def test_upload_pdf():
+    print("\n--- 1. Testing POST /upload with PDF ---")
+    filepath = os.path.join("notes", "Introduction to Psychology.pdf")
+    if not os.path.exists(filepath):
+        filepath = os.path.join("notes", "sample_lecture_quantum.pdf")
+    
     with open(filepath, "rb") as f:
-        files = {"file": ("sample_notes_biology.txt", f, "text/plain")}
-        res = requests.post(f"{BASE_URL}/ingest", files=files)
+        files = {"file": (os.path.basename(filepath), f, "application/pdf")}
+        res = requests.post(f"{BASE_URL}/upload", files=files)
+    
     print("Status:", res.status_code)
     print("Response:", res.json())
     assert res.status_code == 200
     assert res.json().get("status") == "success"
-    assert res.json().get("chunks_loaded") > 0
-    print("Ingest test passed.")
+    assert res.json().get("chunks_stored") > 0
+    print("Upload PDF passed.")
 
-def test_invalid_ingest():
-    print("\n--- Testing /ingest with unsupported file (.png) ---")
-    files = {"file": ("diagram.png", b"\x89PNG\r\n\x1a\n dummy", "image/png")}
-    res = requests.post(f"{BASE_URL}/ingest", files=files)
+def test_upload_invalid_file():
+    print("\n--- Testing POST /upload with invalid non-PDF file ---")
+    files = {"file": ("notes.txt", b"just some text", "text/plain")}
+    res = requests.post(f"{BASE_URL}/upload", files=files)
     print("Status:", res.status_code)
-    print("Response:", res.json())
     assert res.status_code == 400
-    assert "Only .txt, .pdf, and .docx files allowed" in res.json().get("detail", "")
-    print("Invalid ingest validation passed.")
+    print("Non-PDF rejection passed.")
 
-def test_ingest_pdf():
-    print("\n--- Testing /ingest with notes/sample_lecture_quantum.pdf ---")
-    filepath = os.path.join("notes", "sample_lecture_quantum.pdf")
-    with open(filepath, "rb") as f:
-        files = {"file": ("sample_lecture_quantum.pdf", f, "application/pdf")}
-        res = requests.post(f"{BASE_URL}/ingest", files=files)
+def test_ask_socratic_in_scope():
+    print("\n--- 2. Testing POST /ask-socratic (In-scope question) ---")
+    res = requests.post(f"{BASE_URL}/ask-socratic", json={"question": "What is psychology?"})
     print("Status:", res.status_code)
-    print("Response:", res.json())
-    assert res.status_code == 200
-    assert res.json().get("status") == "success"
-    assert res.json().get("chunks_loaded") > 0
-    print("PDF ingest test passed.")
-
-def test_ask_pdf():
-    print("\n--- Testing /ask for PDF content ---")
-    query = "In quantum computing, what states can qubits exist in?"
-    res = requests.post(f"{BASE_URL}/ask", json={"query": query})
-    print("Status:", res.status_code)
-    print("Response:", res.json())
     data = res.json()
+    print("Response:", data)
     assert res.status_code == 200
-    assert data.get("status") == "answered"
-    assert "sample_lecture_quantum.pdf" in data.get("citations", [])
-    print("PDF question answered successfully.")
+    assert data.get("status") == "success"
+    assert "answer" in data
+    assert len(data.get("sources", [])) > 0
+    print("Socratic tutor in-scope passed.")
 
-def test_ask_valid():
-    print("\n--- Testing /ask with in-scope question ---")
-    query = "What is the function of mitochondria and what role do cristae play?"
-    res = requests.post(f"{BASE_URL}/ask", json={"query": query})
+def test_ask_socratic_escalation():
+    print("\n--- Testing POST /ask-socratic (Out-of-scope escalation) ---")
+    res = requests.post(f"{BASE_URL}/ask-socratic", json={"question": "What is the atomic mass of Californium?"})
     print("Status:", res.status_code)
-    print("Response:", res.json())
     data = res.json()
+    print("Response:", data)
     assert res.status_code == 200
-    assert data.get("status") == "answered"
-    assert "sample_notes_biology.txt" in data.get("citations", [])
-    assert len(data.get("answer", "")) > 10
-    print("In-scope ask test passed.")
+    assert data.get("answer") == "ESCALATE"
+    assert data.get("status") == "not_in_syllabus"
+    print("Escalation guard passed.")
 
-def test_ask_photosynthesis():
-    print("\n--- Testing /ask with another in-scope question ---")
-    query = "What is the chemical equation for photosynthesis?"
-    res = requests.post(f"{BASE_URL}/ask", json={"query": query})
+def test_triage():
+    print("\n--- 3. Testing POST /triage (Emergency exam study plan) ---")
+    payload = {
+        "subject": "Introduction to Psychology",
+        "hours_left": 3,
+        "weak_topics": ["memory", "conditioning", "behaviorism"]
+    }
+    res = requests.post(f"{BASE_URL}/triage", json=payload)
     print("Status:", res.status_code)
-    print("Response:", res.json())
     data = res.json()
+    print("Response:", data)
     assert res.status_code == 200
-    assert data.get("status") == "answered"
-    print("Photosynthesis ask test passed.")
-
-def test_ask_out_of_scope_escalation():
-    print("\n--- Testing /ask with out-of-scope question (Escalation) ---")
-    query = "Who was Napoleon Bonaparte and when was the battle of Waterloo?"
-    res = requests.post(f"{BASE_URL}/ask", json={"query": query})
-    print("Status:", res.status_code)
-    print("Response:", res.json())
-    data = res.json()
-    assert res.status_code == 200
-    print(f"Result status: {data.get('status')} (Reason: {data.get('reason')})")
-    print("Escalation check completed.")
-
-def test_ingest_docx():
-    print("\n--- Testing /ingest with notes/sample_history_renaissance.docx ---")
-    filepath = os.path.join("notes", "sample_history_renaissance.docx")
-    with open(filepath, "rb") as f:
-        files = {"file": ("sample_history_renaissance.docx", f, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
-        res = requests.post(f"{BASE_URL}/ingest", files=files)
-    print("Status:", res.status_code)
-    print("Response:", res.json())
-    assert res.status_code == 200
-    assert res.json().get("status") == "success"
-    assert res.json().get("chunks_loaded") > 0
-    print("DOCX ingest test passed.")
-
-def test_ask_docx():
-    print("\n--- Testing /ask for DOCX content ---")
-    query = "Who invented the movable-type printing press and around what year?"
-    res = requests.post(f"{BASE_URL}/ask", json={"query": query})
-    print("Status:", res.status_code)
-    print("Response:", res.json())
-    data = res.json()
-    assert res.status_code == 200
-    assert data.get("status") == "answered"
-    assert "sample_history_renaissance.docx" in data.get("citations", [])
-    print("DOCX question answered successfully.")
+    assert data.get("status") == "success"
+    plan = data.get("study_plan", {})
+    assert "high_yield_core" in plan
+    assert "quick_wins" in plan
+    assert "skip_list" in plan
+    print("Emergency triage passed.")
 
 if __name__ == "__main__":
     if not wait_for_server():
         sys.exit(1)
-    test_ingest()
-    test_ingest_pdf()
-    test_ingest_docx()
-    test_invalid_ingest()
-    test_ask_valid()
-    test_ask_photosynthesis()
-    test_ask_pdf()
-    test_ask_docx()
-    test_ask_out_of_scope_escalation()
-    print("\n=== ALL TESTS (TXT + PDF + DOCX + ESCALATION) COMPLETED SUCCESSFULLY ===")
+    test_upload_pdf()
+    test_upload_invalid_file()
+    test_ask_socratic_in_scope()
+    test_ask_socratic_escalation()
+    test_triage()
+    print("\n=== ALL CLASSCONNECT ENDPOINT TESTS PASSED SUCCESSFULLY ===")

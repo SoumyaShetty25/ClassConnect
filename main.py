@@ -1,153 +1,354 @@
+"""
+ClassConnect — Academic Intelligence API
+Production-ready FastAPI backend for hackathon deployment.
+
+Endpoints:
+  POST /upload        — Ingest PDF course notes into persistent ChromaDB
+  POST /ask-socratic  — Socratic tutor Q&A with escalation guard
+  POST /triage        — Emergency exam study plan generator
+"""
+
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import chromadb
 from sentence_transformers import SentenceTransformer
-from langchain_groq import ChatGroq
+from groq import Groq
 from dotenv import load_dotenv
-# pyrefly: ignore [missing-import]
 from pypdf import PdfReader
-import docx
 import uvicorn
+import json
 import io
 import os
+import re
 
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
 load_dotenv()
 
-app = FastAPI(title="Academic AI - RAG Engine")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+if not GROQ_API_KEY:
+    raise RuntimeError("GROQ_API_KEY not found. Add it to your .env file.")
 
-# CORS — allows frontend to call this API from any origin
+GROQ_MODEL = "qwen/qwen3.8-27b"        # Fast model on Groq
+CHUNK_SIZE = 500                       # ~500 characters per chunk
+CHUNK_OVERLAP = 50                     # ~50 character overlap
+DISTANCE_THRESHOLD = 0.7              # Escalation threshold
+
+# ---------------------------------------------------------------------------
+# App & Middleware
+# ---------------------------------------------------------------------------
+app = FastAPI(
+    title="ClassConnect — Academic Intelligence API",
+    description="Socratic tutoring, smart escalation, and emergency exam triage powered by RAG.",
+    version="1.0.0",
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Lock this down in production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# In-memory vector DB
-chroma_client = chromadb.Client() 
-collection = chroma_client.get_or_create_collection(name="fast_notes")
+# ---------------------------------------------------------------------------
+# Services
+# ---------------------------------------------------------------------------
+# Persistent local ChromaDB — survives server restarts
+chroma_client = chromadb.PersistentClient(path="./chroma_db")
+collection = chroma_client.get_or_create_collection(name="classconnect_notes")
 
+# Embedding model (downloads ~130 MB on first run, cached after)
 embedder = SentenceTransformer("BAAI/bge-small-en-v1.5")
-llm = ChatGroq(
-    model="qwen/qwen3.8-27b",
-    temperature=0.1,
-    api_key=os.getenv("GROQ_API_KEY")
-)
 
-class QueryRequest(BaseModel):
-    query: str
+# Groq LLM client
+groq_client = Groq(api_key=GROQ_API_KEY)
 
-@app.post("/ingest")
-async def ingest_file(file: UploadFile = File(...)):
-    filename = file.filename.lower()
-    content = await file.read()
-    
-    if filename.endswith(".txt"):
-        try:
-            text = content.decode("utf-8")
-        except UnicodeDecodeError:
-            text = content.decode("latin-1", errors="ignore")
-    elif filename.endswith(".pdf"):
-        try:
-            pdf_reader = PdfReader(io.BytesIO(content))
-            extracted_pages = [page.extract_text() or "" for page in pdf_reader.pages]
-            text = "\n".join(extracted_pages).strip()
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Failed to read PDF file: {str(e)}")
-    elif filename.endswith(".docx"):
-        try:
-            doc = docx.Document(io.BytesIO(content))
-            paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-            for table in doc.tables:
-                for row in table.rows:
-                    row_text = " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
-                    if row_text:
-                        paragraphs.append(row_text)
-            text = "\n".join(paragraphs).strip()
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Failed to read DOCX file: {str(e)}")
-    else:
-        raise HTTPException(status_code=400, detail="Only .txt, .pdf, and .docx files allowed.")
-    
-    if not text.strip():
-        raise HTTPException(status_code=400, detail="Uploaded file contains no readable text.")
-    
-    chunk_size = 500
-    chunks = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
-    
-    embeddings = embedder.encode(chunks).tolist()
-    ids = [f"{file.filename}_{i}" for i in range(len(chunks))]
-    metadatas = [{"source": file.filename} for _ in chunks]
-    
-    collection.add(ids=ids, documents=chunks, embeddings=embeddings, metadatas=metadatas)
-    return {"status": "success", "filename": file.filename, "chunks_loaded": len(chunks)}
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
-import re
+def chunk_text(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
+    """Split text into overlapping chunks of approximately `size` characters."""
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = start + size
+        chunks.append(text[start:end])
+        start += size - overlap  # slide forward with overlap
+    return chunks
+
 
 def clean_text(text: str) -> str:
-    """Removes markdown bold/italic asterisks, backticks, hashtags, and cleans whitespace."""
+    """Strip markdown formatting artifacts for clean plain-text output."""
     text = re.sub(r'\*{1,3}(.*?)\*{1,3}', r'\1', text)
     text = re.sub(r'_{1,3}(.*?)_{1,3}', r'\1', text)
     text = re.sub(r'^#{1,6}\s*', '', text, flags=re.MULTILINE)
     text = re.sub(r'`(.*?)`', r'\1', text)
-    text = re.sub(r'^\s*[\*\-]\s+', '• ', text, flags=re.MULTILINE)
+    text = re.sub(r'^\s*[\*\-]\s+', '- ', text, flags=re.MULTILINE)
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
-@app.post("/ask")
-async def ask_question(payload: QueryRequest):
-    query_vector = embedder.encode([payload.query]).tolist()
-    results = collection.query(query_embeddings=query_vector, n_results=2)
-    
-    if not results["documents"][0]:
-        return {"status": "escalated_to_teacher", "reason": "No notes uploaded yet."}
-        
-    distance = results["distances"][0][0]
-    
-    if distance > 0.7:
-         return {"status": "escalated_to_teacher", "reason": "Low confidence match."}
-         
-    context = "\n".join(results["documents"][0])
-    prompt = (
-        "You are an academic teaching assistant. Answer the question strictly using only the context provided below.\n"
-        "Guidelines:\n"
-        "1. If the provided context is incomplete or does not contain enough information to fully answer the question, do NOT speculate or produce an incomplete response. Instead, start your response with 'ESCALATE:' followed by a clear, concise explanation of what information is missing.\n"
-        "2. Write in clean, plain academic English. Avoid using markdown formatting tags, asterisks (**), hashtags (#), or code backticks (`). Present your answer in clear, well-structured paragraphs.\n\n"
-        f"Context:\n{context}\n\n"
-        f"Question: {payload.query}\n\n"
-        "Answer:"
-    )
-    
-    response = llm.invoke(prompt)
-    raw_answer = response.content.strip()
-    
-    # Check if the model flagged insufficient context or requested escalation
-    lower_answer = raw_answer.lower()
-    is_escalated = (
-        raw_answer.upper().startswith("ESCALATE:")
-        or "cannot be derived from the given" in lower_answer
-        or "not possible to" in lower_answer
-        or "insufficient information" in lower_answer
-    )
-    
-    if is_escalated:
-        reason = raw_answer
-        if reason.upper().startswith("ESCALATE:"):
-            reason = reason[len("ESCALATE:"):].strip()
-        return {
-            "status": "escalated_to_teacher",
-            "reason": clean_text(reason),
-            "citations": [results["metadatas"][0][0]["source"]]
+
+def extract_llm_text(raw: str) -> str:
+    """Strip <think>...</think> blocks from thinking-model output."""
+    raw = re.sub(r'<think>[\s\S]*?</think>', '', raw, flags=re.IGNORECASE)
+    return raw.strip()
+
+
+def call_groq(messages: list[dict], json_mode: bool = False) -> str:
+    """Call Groq API and return the assistant's message text, with error handling."""
+    try:
+        kwargs = {
+            "model": GROQ_MODEL,
+            "messages": messages,
+            "temperature": 0.3,
+            "max_tokens": 600,
         }
-    
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+
+        response = groq_client.chat.completions.create(**kwargs)
+        raw = response.choices[0].message.content or ""
+        return extract_llm_text(raw)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Groq API error: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# Pydantic Models
+# ---------------------------------------------------------------------------
+
+class SocraticRequest(BaseModel):
+    question: str
+
+class TriageRequest(BaseModel):
+    subject: str
+    hours_left: int
+    weak_topics: list[str]
+
+# ---------------------------------------------------------------------------
+# Endpoint 1: POST /upload — Ingest PDF course notes
+# ---------------------------------------------------------------------------
+
+@app.post("/upload")
+async def upload_pdf(file: UploadFile = File(...)):
+    """Upload a PDF file. Extracts text, chunks with overlap, embeds, and stores in ChromaDB."""
+
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
+
+    content = await file.read()
+
+    # Extract text from PDF
+    try:
+        reader = PdfReader(io.BytesIO(content))
+        pages = [page.extract_text() or "" for page in reader.pages]
+        text = "\n".join(pages).strip()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to read PDF: {str(e)}")
+
+    if not text:
+        raise HTTPException(status_code=400, detail="PDF contains no readable text.")
+
+    # Chunk with overlap
+    chunks = chunk_text(text)
+
+    # Embed and store
+    embeddings = embedder.encode(chunks).tolist()
+    ids = [f"{file.filename}_chunk_{i}" for i in range(len(chunks))]
+    metadatas = [{"source": file.filename, "chunk_index": i} for i in range(len(chunks))]
+
+    collection.upsert(ids=ids, documents=chunks, embeddings=embeddings, metadatas=metadatas)
+
     return {
-        "status": "answered",
-        "answer": clean_text(raw_answer),
-        "citations": [results["metadatas"][0][0]["source"]]
+        "status": "success",
+        "message": f"Uploaded and indexed {len(chunks)} chunks from '{file.filename}'.",
+        "filename": file.filename,
+        "chunks_stored": len(chunks),
     }
+
+
+# ---------------------------------------------------------------------------
+# Endpoint 2: POST /ask-socratic — Socratic tutor with escalation guard
+# ---------------------------------------------------------------------------
+
+@app.post("/ask-socratic")
+async def ask_socratic(payload: SocraticRequest):
+    """
+    Socratic Q&A endpoint.
+    - Checks if the question is covered in uploaded notes.
+    - If distance > 0.7: returns ESCALATE immediately (no Groq call).
+    - Otherwise: Groq generates a Socratic hint with a follow-up question.
+    """
+
+    # Embed the question and query ChromaDB for top 3 chunks
+    query_embedding = embedder.encode([payload.question]).tolist()
+    results = collection.query(query_embeddings=query_embedding, n_results=3)
+
+    # Guard: no documents uploaded yet
+    if not results["documents"][0]:
+        return {
+            "answer": "ESCALATE",
+            "status": "not_in_syllabus",
+            "reason": "No course notes have been uploaded yet. Please upload PDF notes first.",
+        }
+
+    # Distance check — closest chunk
+    best_distance = results["distances"][0][0]
+
+    if best_distance > DISTANCE_THRESHOLD:
+        return {
+            "answer": "ESCALATE",
+            "status": "not_in_syllabus",
+        }
+
+    # Build context from retrieved chunks
+    context_chunks = results["documents"][0]
+    context = "\n---\n".join(context_chunks)
+
+    # Socratic tutor prompt (exact spec)
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a strict Socratic tutor. Using ONLY the provided context from "
+                "the professor's notes, help the student. "
+                "Rule 1: NEVER give the final answer. "
+                "Rule 2: Give a small hint based on the context. "
+                "Rule 3: End with a question asking the student to explain the next step."
+            ),
+        },
+        {
+            "role": "user",
+            "content": f"Context from course notes:\n{context}\n\nStudent's question: {payload.question}",
+        },
+    ]
+
+    answer = call_groq(messages)
+
+    if not answer:
+        return {
+            "answer": "ESCALATE",
+            "status": "not_in_syllabus",
+            "reason": "The AI model returned an empty response.",
+        }
+
+    # Build source excerpts (first 120 chars of each chunk for brevity)
+    sources = [chunk[:120] + "..." if len(chunk) > 120 else chunk for chunk in context_chunks]
+
+    return {
+        "answer": clean_text(answer),
+        "status": "success",
+        "sources": sources,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Endpoint 3: POST /triage — Emergency exam study plan
+# ---------------------------------------------------------------------------
+
+@app.post("/triage")
+async def triage(payload: TriageRequest):
+    """
+    Emergency Academic Triage.
+    - Queries ChromaDB using weak_topics to pull relevant syllabus context.
+    - Calls Groq in JSON mode to generate a Minimum Viable Study Plan.
+    """
+
+    if not payload.weak_topics:
+        raise HTTPException(status_code=400, detail="Please provide at least one weak topic.")
+
+    # Query ChromaDB for each weak topic, gather unique context chunks
+    all_chunks = []
+    seen_ids = set()
+
+    for topic in payload.weak_topics:
+        topic_embedding = embedder.encode([topic]).tolist()
+        results = collection.query(query_embeddings=topic_embedding, n_results=3)
+
+        if results["documents"][0]:
+            for i, doc in enumerate(results["documents"][0]):
+                chunk_id = results["ids"][0][i] if results["ids"][0] else f"{topic}_{i}"
+                if chunk_id not in seen_ids:
+                    seen_ids.add(chunk_id)
+                    all_chunks.append(doc)
+
+    if not all_chunks:
+        return {
+            "status": "error",
+            "message": "No course notes found. Please upload PDF notes first.",
+        }
+
+    context = "\n---\n".join(all_chunks)
+
+    # Triage prompt (exact spec) — JSON mode
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                f"You are an Emergency Academic Triage AI. The student has an exam in "
+                f"{payload.hours_left} hours for {payload.subject}. Based ONLY on the "
+                f"provided course notes context, generate a Minimum Viable Study Plan. "
+                f"Output a JSON object with exactly 3 keys: "
+                f"'high_yield_core' (topics to spend 70% of time on, list of strings), "
+                f"'quick_wins' (easy definitions, list of strings), "
+                f"'skip_list' (low priority, list of strings)."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Course notes context:\n{context}\n\n"
+                f"Weak topics the student identified: {', '.join(payload.weak_topics)}"
+            ),
+        },
+    ]
+
+    raw_json = call_groq(messages, json_mode=True)
+
+    if not raw_json:
+        raise HTTPException(status_code=502, detail="Triage model returned empty response.")
+
+    # Parse the JSON response
+    try:
+        study_plan = json.loads(raw_json)
+    except json.JSONDecodeError:
+        # If JSON parsing fails, return raw text as fallback
+        return {
+            "status": "success",
+            "study_plan": raw_json,
+            "warning": "Response was not valid JSON. Returning raw text.",
+        }
+
+    return {
+        "status": "success",
+        "subject": payload.subject,
+        "hours_left": payload.hours_left,
+        "study_plan": study_plan,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Health check
+# ---------------------------------------------------------------------------
+
+@app.get("/")
+async def root():
+    """Health check endpoint."""
+    doc_count = collection.count()
+    return {
+        "service": "ClassConnect — Academic Intelligence API",
+        "status": "online",
+        "documents_indexed": doc_count,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Run
+# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
-

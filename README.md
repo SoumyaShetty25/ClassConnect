@@ -1,19 +1,17 @@
-# Academic AI — RAG Backend
+# ClassConnect — Academic Intelligence API
 
-A Retrieval-Augmented Generation (RAG) backend designed for academic learning, course notes, and lecture slide Q&A. Students can upload `.txt`, `.pdf`, and `.docx` documents, then query them in natural language. The engine retrieves relevant excerpts and generates clean, grounded answers with file citations — or automatically escalates to a teacher when notes do not contain sufficient detail.
+A Retrieval-Augmented Generation (RAG) backend that transforms course PDFs into an intelligent Socratic tutor and emergency exam triage system. Built for hackathons, powered by Groq.
 
 ---
 
 ## Features
 
-- 📄 **Multi-Format Ingestion**: Upload plain text (`.txt`) notes, multi-page slide decks and papers (`.pdf`), or Microsoft Word documents (`.docx`).
-- ⚡ **Lightning Fast & Free**: Powered by `qwen/qwen3.8-27b` on Groq API with near-zero latency.
-- 🎯 **Two-Tier Escalation**:
-  1. *Vector Search Threshold*: Escalates queries that have low semantic similarity (`distance > 0.7`).
-  2. *LLM Context Completeness*: Model detects partial or missing context and explicitly flags `ESCALATE` with reasons rather than guessing.
-- 🧼 **Clean Plain-Text Answers**: Strips distracting markdown formatting, asterisks (`**`), code backticks, and header hashes for human-readable academic English.
-- 💻 **Interactive Terminal CLI**: Chat directly with your documents from Command Prompt or PowerShell (`cli.py`).
-- 🌐 **CORS-Enabled REST API**: Ready to connect with React, Next.js, Vue, or any web frontend.
+- 📚 **PDF Ingestion** — Upload lecture slides, syllabi, or course notes. Text is extracted, chunked with overlap, embedded, and stored persistently.
+- 👩‍🏫 **Socratic Tutoring** — Guides students step-by-step instead of giving away answers. Ends every response with a follow-up question.
+- 🛡️ **Smart Escalation** — If the question is not covered in the uploaded notes (distance > 0.7), the system immediately returns `ESCALATE` without calling the LLM.
+- 🚑 **Emergency Triage** — Generates a structured JSON study plan with `high_yield_core`, `quick_wins`, and `skip_list` based on uploaded course content.
+- 💾 **Persistent Storage** — ChromaDB saves to disk (`./chroma_db`). Notes survive server restarts.
+- ⚡ **Fast & Free** — Uses Groq API for near-zero latency inference.
 
 ---
 
@@ -22,12 +20,12 @@ A Retrieval-Augmented Generation (RAG) backend designed for academic learning, c
 ### 1. Clone & Install
 
 ```bash
-git clone https://github.com/<your-org>/AcademicAI_RAG.git
-cd AcademicAI_RAG
+git clone https://github.com/<your-org>/ClassConnect.git
+cd ClassConnect
 pip install -r requirements.txt
 ```
 
-### 2. Set Up Environment Variables
+### 2. Set Up Environment
 
 ```bash
 cp .env.example .env
@@ -45,143 +43,156 @@ GROQ_API_KEY=gsk_your_key_here
 python main.py
 ```
 
-> **Note:** The first run downloads the `BAAI/bge-small-en-v1.5` embedding model (~130 MB). Subsequent starts load from local cache instantly.
+> **Note:** First run downloads the `BAAI/bge-small-en-v1.5` embedding model (~130 MB). Cached after.
 
-- **API Endpoint:** `http://localhost:8000`
-- **Interactive Swagger Docs:** `http://localhost:8000/docs`
-
----
-
-## Command Line Interface (CLI)
-
-You can interact with the engine directly in your Command Prompt / terminal without a browser:
-
-```bash
-# 1. Interactive terminal chat mode (recommended)
-python cli.py
-
-# 2. Ingest notes directly
-python cli.py ingest "notes/machine_learning_notes.pdf"
-
-# 3. Ask a question directly
-python cli.py ask "What is the well-posed learning problem definition?"
-```
+- **API:** `http://localhost:8000`
+- **Swagger Docs:** `http://localhost:8000/docs`
+- **Health Check:** `GET /` → returns service status and document count
 
 ---
 
 ## API Reference
 
-### `POST /ingest` — Upload Notes (.txt, .pdf, or .docx)
+### `POST /upload` — Upload PDF Course Notes
 
-Upload a `.txt`, `.pdf`, or `.docx` file to extract text, chunk (500 chars), embed, and store in ChromaDB.
+Upload a PDF file. Text is extracted, split into ~500 character chunks with ~50 character overlap, embedded, and stored in ChromaDB.
 
 ```bash
-# Upload plain text notes
-curl -X POST http://localhost:8000/ingest \
-  -F "file=@biology_notes.txt"
-
-# Upload PDF slides or lecture notes
-curl -X POST http://localhost:8000/ingest \
+curl -X POST http://localhost:8000/upload \
   -F "file=@machine_learning_notes.pdf"
-
-# Upload Word documents
-curl -X POST http://localhost:8000/ingest \
-  -F "file=@study_guide.docx"
 ```
 
 **Response:**
 ```json
 {
   "status": "success",
+  "message": "Uploaded and indexed 94 chunks from 'machine_learning_notes.pdf'.",
   "filename": "machine_learning_notes.pdf",
-  "chunks_loaded": 94
-}
-```
-
-### `POST /ask` — Ask a Question
-
-```bash
-curl -X POST http://localhost:8000/ask \
-  -H "Content-Type: application/json" \
-  -d '{"query": "What is machine learning?"}'
-```
-
-**Response (Answered):**
-```json
-{
-  "status": "answered",
-  "answer": "Machine learning is defined by the concept of a well-posed learning problem: a computer program is said to learn from experience E with respect to some class of tasks T and performance measure P, if its performance at tasks in T, as measured by P, improves with experience E.",
-  "citations": ["machine_learning_notes.pdf"]
-}
-```
-
-**Response (Escalated to Teacher):**
-```json
-{
-  "status": "escalated_to_teacher",
-  "reason": "The context does not contain information on data preparation or loan default prediction pipelines.",
-  "citations": ["machine_learning_notes.pdf"]
+  "chunks_stored": 94
 }
 ```
 
 ---
 
-## Architecture & Pipeline
+### `POST /ask-socratic` — Socratic Tutor Q&A
 
-```
-Ingestion Pipeline:
-  [.txt / .pdf] ──> text extraction (pypdf) ──> chunking (500 chars)
-                ──> BGE embeddings ──> ChromaDB vector storage
+Send a student's question. The system retrieves the top 3 relevant chunks and generates a Socratic hint — never the final answer.
 
-Query Pipeline:
-  [Question]    ──> query embedding ──> top-2 vector retrieval
-                ──> Distance > 0.7? ──> YES: Escalate to Teacher
-                ──> NO: Prompt Qwen (Groq) with context
-                ──> Model detects incomplete context? ──> YES: Escalate to Teacher
-                ──> NO: Sanitize output & return answer with citations
+```bash
+curl -X POST http://localhost:8000/ask-socratic \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What is supervised learning?"}'
 ```
 
-| Component       | Technology                                                      |
-|-----------------|-----------------------------------------------------------------|
-| Framework       | FastAPI + Uvicorn                                               |
-| Vector Database | ChromaDB (in-memory, cosine distance)                           |
-| Embedding Model | `BAAI/bge-small-en-v1.5` (SentenceTransformers, 384 dimensions)  |
-| LLM Provider    | Groq API → `qwen/qwen3.8-27b`                                   |
-| Document Parser | `pypdf` (multi-page PDF support)                                |
-| CLI Client      | `cli.py` (Windows cp1252-compatible terminal client)           |
-| Cross-Origin    | CORS enabled for all origins (`*`)                              |
+**Response (Success):**
+```json
+{
+  "answer": "That's a great question! The notes mention that in this type of learning, the algorithm is given labeled examples. Think about what 'labeled' means here — can you describe what the algorithm is trying to learn from those labels?",
+  "status": "success",
+  "sources": ["In supervised learning, the algorithm is trained on a labeled dataset..."]
+}
+```
+
+**Response (Escalated — not in syllabus):**
+```json
+{
+  "answer": "ESCALATE",
+  "status": "not_in_syllabus"
+}
+```
+
+---
+
+### `POST /triage` — Emergency Exam Study Plan
+
+Generate a minimum viable study plan when the student is running out of time before an exam.
+
+```bash
+curl -X POST http://localhost:8000/triage \
+  -H "Content-Type: application/json" \
+  -d '{"subject": "Machine Learning", "hours_left": 4, "weak_topics": ["SVM", "decision trees", "overfitting"]}'
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "subject": "Machine Learning",
+  "hours_left": 4,
+  "study_plan": {
+    "high_yield_core": ["Bias-Variance Tradeoff", "Overfitting and Regularization"],
+    "quick_wins": ["Decision Tree terminology: root, leaf, depth", "SVM margin definition"],
+    "skip_list": ["Kernel trick derivation", "Ensemble methods deep dive"]
+  }
+}
+```
+
+---
+
+## Architecture
+
+```
+Upload Pipeline:
+  [PDF] ──> pypdf text extraction ──> overlapping chunking (500c / 50c overlap)
+        ──> BGE embeddings ──> ChromaDB persistent storage (./chroma_db)
+
+Socratic Pipeline:
+  [Question] ──> embed query ──> top-3 retrieval from ChromaDB
+             ──> Distance > 0.7? ──> YES: Return ESCALATE (no LLM call)
+             ──> NO: Groq Socratic prompt ──> hint + follow-up question
+
+Triage Pipeline:
+  [Weak Topics] ──> embed each topic ──> retrieve relevant chunks
+                ──> Groq JSON mode ──> structured study plan
+```
+
+| Component       | Technology                                                       |
+|-----------------|------------------------------------------------------------------|
+| Framework       | FastAPI + Uvicorn                                                |
+| Vector Database | ChromaDB (persistent, cosine distance)                           |
+| Embedding Model | `BAAI/bge-small-en-v1.5` (SentenceTransformers, 384 dimensions) |
+| LLM Provider    | Groq API → `qwen-2.5-32b`                                       |
+| Document Parser | `pypdf` (multi-page PDF text extraction)                         |
+| Cross-Origin    | CORS enabled for all origins (`*`)                               |
 
 ---
 
 ## Frontend Integration
 
-The backend exposes a CORS-ready REST API on port `8000`. Connect from any frontend:
+The backend exposes a CORS-ready REST API on port `8000`. Connect from React, Next.js, Vue, or any frontend:
 
 ```javascript
-// Upload document
+// Upload PDF
 const formData = new FormData();
 formData.append('file', fileInput.files[0]);
-const uploadRes = await fetch('http://localhost:8000/ingest', {
+const res = await fetch('http://localhost:8000/upload', {
   method: 'POST',
   body: formData,
 });
-const uploadData = await uploadRes.json();
-console.log(`Loaded ${uploadData.chunks_loaded} chunks!`);
 
-// Query notes
-const askRes = await fetch('http://localhost:8000/ask', {
+// Socratic Q&A
+const askRes = await fetch('http://localhost:8000/ask-socratic', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ query: 'What is photosynthesis?' }),
+  body: JSON.stringify({ question: 'What is gradient descent?' }),
 });
 const result = await askRes.json();
-
-if (result.status === 'answered') {
-  console.log('Answer:', result.answer);
-  console.log('Citations:', result.citations);
-} else if (result.status === 'escalated_to_teacher') {
-  console.warn('Escalated:', result.reason);
+if (result.status === 'success') {
+  console.log('Hint:', result.answer);
+} else {
+  console.warn('Not in syllabus — escalated.');
 }
+
+// Triage
+const triageRes = await fetch('http://localhost:8000/triage', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    subject: 'Psychology',
+    hours_left: 3,
+    weak_topics: ['memory', 'conditioning'],
+  }),
+});
 ```
 
 ---
@@ -189,19 +200,15 @@ if (result.status === 'answered') {
 ## Project Structure
 
 ```
-AcademicAI_RAG/
-├── main.py                     # FastAPI backend (ingest, ask, clean_text, CORS)
-├── cli.py                      # Terminal client (interactive chat & quick commands)
-├── test_rag.py                 # Automated end-to-end test suite
-├── requirements.txt            # Pinned dependencies
-├── .env                        # Secret API keys (gitignored)
-├── .env.example                # Template for required environment variables
-├── .gitignore                  # Excludes secrets, cache, venv, and IDE files
-├── README.md                   # Project documentation
-├── CONTEXT.md                  # Development progress log
-└── notes/                      # Academic documents and lecture materials
-    ├── Introduction to Psychology.pdf
-    └── machine_learning_notes.pdf
+ClassConnect/
+├── main.py              # Complete FastAPI backend (3 endpoints + health check)
+├── requirements.txt     # Pinned dependencies
+├── .env                 # GROQ_API_KEY (gitignored)
+├── .env.example         # Template for required env vars
+├── .gitignore           # Excludes .env, chroma_db/, __pycache__/
+├── README.md            # This file
+├── chroma_db/           # Persistent vector storage (auto-created, gitignored)
+└── notes/               # Academic PDFs for upload
 ```
 
 ---
