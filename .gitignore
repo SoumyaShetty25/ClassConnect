@@ -15,6 +15,20 @@ build/
 venv/
 env/
 
+# ---- Node / Frontend ----
+node_modules/
+*/node_modules/
+dist/
+*/dist/
+.vite/
+*/.vite/
+package-lock.json
+
+# ---- Archives ----
+*.zip
+*.tar.gz
+*.rar
+
 # ---- IDE ----
 .vscode/
 .idea/
