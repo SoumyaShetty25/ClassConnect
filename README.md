@@ -1,6 +1,6 @@
 # Academic AI — RAG Backend
 
-A Retrieval-Augmented Generation (RAG) backend for academic Q&A. Upload `.txt` study notes, then ask questions — the engine retrieves relevant context and generates grounded answers using an LLM. Low-confidence queries are escalated to a teacher.
+A Retrieval-Augmented Generation (RAG) backend for academic Q&A. Upload `.txt` or `.pdf` study notes and lecture slides, then ask questions — the engine retrieves relevant context and generates grounded answers using an LLM. Low-confidence queries are escalated to a teacher.
 
 ## Quick Start
 
@@ -39,18 +39,27 @@ Interactive docs at **http://localhost:8000/docs**
 
 ## API Reference
 
-### `POST /ingest` — Upload notes
+### `POST /ingest` — Upload notes (.txt or .pdf)
 
-Upload a `.txt` file to chunk, embed, and store.
+Upload a `.txt` or `.pdf` file to extract text, chunk, embed, and store.
 
 ```bash
+# Upload plain text notes
 curl -X POST http://localhost:8000/ingest \
   -F "file=@biology_notes.txt"
+
+# Upload PDF slides or papers
+curl -X POST http://localhost:8000/ingest \
+  -F "file=@lecture_slides.pdf"
 ```
 
 **Response:**
 ```json
-{ "status": "success", "chunks_loaded": 5 }
+{
+  "status": "success",
+  "filename": "lecture_slides.pdf",
+  "chunks_loaded": 8
+}
 ```
 
 ### `POST /ask` — Ask a question

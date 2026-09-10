@@ -31,14 +31,38 @@ def test_ingest():
     print("Ingest test passed.")
 
 def test_invalid_ingest():
-    print("\n--- Testing /ingest with non-txt file ---")
-    files = {"file": ("document.pdf", b"%PDF-1.4 dummy", "application/pdf")}
+    print("\n--- Testing /ingest with unsupported file (.png) ---")
+    files = {"file": ("diagram.png", b"\x89PNG\r\n\x1a\n dummy", "image/png")}
     res = requests.post(f"{BASE_URL}/ingest", files=files)
     print("Status:", res.status_code)
     print("Response:", res.json())
     assert res.status_code == 400
-    assert "Only .txt files allowed" in res.json().get("detail", "")
+    assert "Only .txt and .pdf files allowed" in res.json().get("detail", "")
     print("Invalid ingest validation passed.")
+
+def test_ingest_pdf():
+    print("\n--- Testing /ingest with sample_lecture_quantum.pdf ---")
+    with open("sample_lecture_quantum.pdf", "rb") as f:
+        files = {"file": ("sample_lecture_quantum.pdf", f, "application/pdf")}
+        res = requests.post(f"{BASE_URL}/ingest", files=files)
+    print("Status:", res.status_code)
+    print("Response:", res.json())
+    assert res.status_code == 200
+    assert res.json().get("status") == "success"
+    assert res.json().get("chunks_loaded") > 0
+    print("PDF ingest test passed.")
+
+def test_ask_pdf():
+    print("\n--- Testing /ask for PDF content ---")
+    query = "In quantum computing, what states can qubits exist in?"
+    res = requests.post(f"{BASE_URL}/ask", json={"query": query})
+    print("Status:", res.status_code)
+    print("Response:", res.json())
+    data = res.json()
+    assert res.status_code == 200
+    assert data.get("status") == "answered"
+    assert "sample_lecture_quantum.pdf" in data.get("citations", [])
+    print("PDF question answered successfully.")
 
 def test_ask_valid():
     print("\n--- Testing /ask with in-scope question ---")
@@ -79,8 +103,10 @@ if __name__ == "__main__":
     if not wait_for_server():
         sys.exit(1)
     test_ingest()
+    test_ingest_pdf()
     test_invalid_ingest()
     test_ask_valid()
     test_ask_photosynthesis()
+    test_ask_pdf()
     test_ask_out_of_scope_escalation()
-    print("\n=== ALL TESTS COMPLETED SUCCESSFULLY ===")
+    print("\n=== ALL TESTS (TXT + PDF + ESCALATION) COMPLETED SUCCESSFULLY ===")

@@ -54,10 +54,12 @@ AcademicAI_RAG/
 
 ### Phase 3: Testing & Validation ✅
 - [x] Create a sample `.txt` notes file for testing (`sample_notes_biology.txt`)
-- [x] Test `/ingest` endpoint — upload and chunk notes (3 chunks loaded)
-- [x] Test `/ask` endpoint — query notes and get grounded RAG answers with citations
+- [x] Add PDF support with `pypdf` (`sample_lecture_quantum.pdf`)
+- [x] Test `/ingest` endpoint with `.txt` notes (3 chunks loaded)
+- [x] Test `/ingest` endpoint with `.pdf` lecture files (1 chunk loaded)
+- [x] Test `/ask` endpoint — query `.txt` and `.pdf` notes and get grounded RAG answers with citations
 - [x] Test escalation flow (out-of-scope query successfully escalated with reason "Low confidence match.")
-- [x] Test edge cases (non-.txt upload rejected with 400 Bad Request)
+- [x] Test edge cases (unsupported file upload rejected with 400 Bad Request)
 - [x] Configured working Groq model `qwen/qwen3.8-27b`
 
 ### Phase 4: Frontend 🔲

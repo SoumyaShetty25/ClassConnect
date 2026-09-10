@@ -5,7 +5,9 @@ import chromadb
 from sentence_transformers import SentenceTransformer
 from langchain_groq import ChatGroq
 from dotenv import load_dotenv
+from pypdf import PdfReader
 import uvicorn
+import io
 import os
 
 load_dotenv()
@@ -36,12 +38,27 @@ class QueryRequest(BaseModel):
     query: str
 
 @app.post("/ingest")
-async def ingest_txt(file: UploadFile = File(...)):
-    if not file.filename.endswith(".txt"):
-        raise HTTPException(status_code=400, detail="Only .txt files allowed.")
-    
+async def ingest_file(file: UploadFile = File(...)):
+    filename = file.filename.lower()
     content = await file.read()
-    text = content.decode("utf-8")
+    
+    if filename.endswith(".txt"):
+        try:
+            text = content.decode("utf-8")
+        except UnicodeDecodeError:
+            text = content.decode("latin-1", errors="ignore")
+    elif filename.endswith(".pdf"):
+        try:
+            pdf_reader = PdfReader(io.BytesIO(content))
+            extracted_pages = [page.extract_text() or "" for page in pdf_reader.pages]
+            text = "\n".join(extracted_pages).strip()
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to read PDF file: {str(e)}")
+    else:
+        raise HTTPException(status_code=400, detail="Only .txt and .pdf files allowed.")
+    
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="Uploaded file contains no readable text.")
     
     chunk_size = 500
     chunks = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
@@ -51,7 +68,7 @@ async def ingest_txt(file: UploadFile = File(...)):
     metadatas = [{"source": file.filename} for _ in chunks]
     
     collection.add(ids=ids, documents=chunks, embeddings=embeddings, metadatas=metadatas)
-    return {"status": "success", "chunks_loaded": len(chunks)}
+    return {"status": "success", "filename": file.filename, "chunks_loaded": len(chunks)}
 
 @app.post("/ask")
 async def ask_question(payload: QueryRequest):
