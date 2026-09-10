@@ -1,0 +1,15 @@
+Cell Biology and Energy Metabolism Lecture Notes
+
+1. The Cell Theory
+All living organisms are composed of one or more cells. The cell is the basic structural and functional unit of living organisms. All cells arise from pre-existing cells through cell division. 
+
+2. Mitochondria: Structure and Function
+Mitochondria are double-membrane-bound organelles found in most eukaryotic organisms. Often referred to as the powerhouse of the cell, mitochondria generate most of the cell's supply of adenosine triphosphate (ATP), used as a source of chemical energy. The inner mitochondrial membrane contains folds called cristae, which expand the surface area available for the electron transport chain and ATP synthesis.
+
+3. Photosynthesis in Plant Cells
+Photosynthesis takes place inside chloroplasts, which contain chlorophyll pigments that absorb light energy. The overall chemical equation is:
+6CO2 + 6H2O + Light Energy -> C6H12O6 + 6O2
+The process consists of two stages: light-dependent reactions in the thylakoid membrane and the Calvin cycle (light-independent reactions) in the stroma.
+
+4. Ribosomes and Protein Synthesis
+Ribosomes are macromolecular machines found within all cells that perform biological protein synthesis (translation). Ribosomes link amino acids together in the order specified by the codons of messenger RNA (mRNA) molecules to form polypeptide chains. They consist of two major components: the small and large ribosomal subunits.

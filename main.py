@@ -27,7 +27,7 @@ collection = chroma_client.get_or_create_collection(name="fast_notes")
 
 embedder = SentenceTransformer("BAAI/bge-small-en-v1.5")
 llm = ChatGroq(
-    model="llama-3.1-8b-instant",
+    model="qwen/qwen3.8-27b",
     temperature=0.1,
     api_key=os.getenv("GROQ_API_KEY")
 )

@@ -12,7 +12,7 @@ A Retrieval-Augmented Generation (RAG) backend for academic use. Students upload
 | Framework        | FastAPI                           |
 | Vector DB        | ChromaDB (in-memory)              |
 | Embeddings       | `BAAI/bge-small-en-v1.5` (SentenceTransformers) |
-| LLM              | Groq API → `llama-3.1-8b-instant` |
+| LLM              | Groq API → `qwen/qwen3.8-27b`     |
 | Server           | Uvicorn on `http://0.0.0.0:8000`  |
 
 ---
@@ -21,10 +21,15 @@ A Retrieval-Augmented Generation (RAG) backend for academic use. Students upload
 
 ```
 AcademicAI_RAG/
-├── main.py          # FastAPI backend (ingest + ask endpoints)
-├── .env             # GROQ_API_KEY (gitignored)
-├── .gitignore       # Excludes .env and __pycache__
-└── CONTEXT.md       # This file — project tracker
+├── main.py                   # FastAPI backend (ingest + ask endpoints, CORS)
+├── test_rag.py               # Automated test suite
+├── sample_notes_biology.txt  # Sample academic notes for testing
+├── requirements.txt          # Pinned dependencies
+├── .env                      # GROQ_API_KEY (gitignored)
+├── .env.example              # Template for required env vars
+├── .gitignore                # Excludes secrets, caches, IDE files
+├── README.md                 # Project & API documentation
+└── CONTEXT.md                # Progress tracker
 ```
 
 ---
@@ -38,21 +43,31 @@ AcademicAI_RAG/
 - [x] Secure API key in `.env` with `python-dotenv`
 - [x] Boot server and verify Swagger UI at `/docs`
 
-### Phase 2: Testing & Validation 🔲
-- [ ] Create a sample `.txt` notes file for testing
-- [ ] Test `/ingest` endpoint — upload and chunk notes
-- [ ] Test `/ask` endpoint — query notes and get RAG answers
-- [ ] Test escalation flow (no notes / low confidence)
-- [ ] Test edge cases (empty file, non-.txt upload, very long file)
+### Phase 2: GitHub-Ready Packaging ✅
+- [x] Add `requirements.txt` with pinned versions
+- [x] Add `.env.example` template (safe to commit)
+- [x] Expand `.gitignore` (secrets, Python, IDE, OS)
+- [x] Add CORS middleware for frontend integration
+- [x] Create `README.md` with setup, API docs, and frontend integration examples
+- [x] Initialize git repo and create initial commit
+- [x] Verify `.env` is excluded from tracked files
 
-### Phase 3: Frontend 🔲
+### Phase 3: Testing & Validation ✅
+- [x] Create a sample `.txt` notes file for testing (`sample_notes_biology.txt`)
+- [x] Test `/ingest` endpoint — upload and chunk notes (3 chunks loaded)
+- [x] Test `/ask` endpoint — query notes and get grounded RAG answers with citations
+- [x] Test escalation flow (out-of-scope query successfully escalated with reason "Low confidence match.")
+- [x] Test edge cases (non-.txt upload rejected with 400 Bad Request)
+- [x] Configured working Groq model `qwen/qwen3.8-27b`
+
+### Phase 4: Frontend 🔲
 - [ ] Build a web UI for uploading notes and asking questions
 - [ ] File upload widget with drag-and-drop
 - [ ] Chat-style Q&A interface
 - [ ] Display citations and escalation messages
 - [ ] Connect frontend to backend API
 
-### Phase 4: Hardening & Features 🔲
+### Phase 5: Hardening & Features 🔲
 - [ ] Persistent vector storage (ChromaDB on disk)
 - [ ] Support PDF / DOCX uploads
 - [ ] Smarter chunking (overlap, sentence-aware splits)

@@ -97,7 +97,7 @@ Request flow:
 | Framework   | FastAPI + Uvicorn                       |
 | Vector DB   | ChromaDB (in-memory)                    |
 | Embeddings  | `BAAI/bge-small-en-v1.5` (SentenceTransformers) |
-| LLM         | Groq API → `llama-3.1-8b-instant`      |
+| LLM         | Groq API → `qwen/qwen3.8-27b`           |
 | CORS        | Enabled for frontend integration        |
 
 ---
