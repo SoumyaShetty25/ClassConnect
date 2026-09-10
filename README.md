@@ -37,6 +37,23 @@ Interactive docs at **http://localhost:8000/docs**
 
 ---
 
+## Command Line Interface (CLI)
+
+You can also interact with the RAG engine directly from your terminal:
+
+```bash
+# 1. Interactive terminal chat mode
+python cli.py
+
+# 2. Upload and index a .txt or .pdf file
+python cli.py ingest path/to/lecture_notes.pdf
+
+# 3. Ask a question directly
+python cli.py ask "What is the function of mitochondria?"
+```
+
+---
+
 ## API Reference
 
 ### `POST /ingest` — Upload notes (.txt or .pdf)
