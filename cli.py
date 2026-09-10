@@ -15,11 +15,16 @@ def ingest_file(file_path: str):
         return False
     
     ext = os.path.splitext(file_path)[1].lower()
-    if ext not in [".txt", ".pdf"]:
-        print(f"\n[!] Error: Only .txt and .pdf files are supported (got '{ext}').")
+    if ext not in [".txt", ".pdf", ".docx"]:
+        print(f"\n[!] Error: Only .txt, .pdf, and .docx files are supported (got '{ext}').")
         return False
     
-    mime = "application/pdf" if ext == ".pdf" else "text/plain"
+    if ext == ".pdf":
+        mime = "application/pdf"
+    elif ext == ".docx":
+        mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    else:
+        mime = "text/plain"
     filename = os.path.basename(file_path)
     
     print(f"\n[*] Uploading and indexing '{filename}'...")
@@ -85,7 +90,7 @@ def ask_question(query: str):
 def interactive_mode():
     print_banner()
     print("Commands:")
-    print("  /upload <path>   Upload and index a .txt or .pdf file")
+    print("  /upload <path>   Upload and index a .txt, .pdf, or .docx file")
     print("  /exit            Quit the program")
     print("  Or simply type any question to ask your notes!\n")
     
@@ -103,7 +108,7 @@ def interactive_mode():
                 file_path = user_input[8:].strip().strip('"').strip("'")
                 ingest_file(file_path)
             elif user_input.lower() == "/upload":
-                path = input("Enter path to .txt or .pdf file: ").strip().strip('"').strip("'")
+                path = input("Enter path to .txt, .pdf, or .docx file: ").strip().strip('"').strip("'")
                 ingest_file(path)
             else:
                 ask_question(user_input)
@@ -124,7 +129,7 @@ if __name__ == "__main__":
     elif len(args) == 1 and args[0].lower() in ["--help", "-h", "help"]:
         print("Usage:")
         print("  python cli.py                       # Launch interactive terminal mode")
-        print("  python cli.py ingest <filepath>     # Upload and index a .txt or .pdf")
+        print("  python cli.py ingest <filepath>     # Upload and index a .txt, .pdf, or .docx")
         print("  python cli.py ask \"<question>\"      # Query notes and get answer")
     else:
         interactive_mode()

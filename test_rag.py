@@ -1,6 +1,7 @@
 import requests
 import time
 import sys
+import os
 
 BASE_URL = "http://localhost:8000"
 
@@ -19,8 +20,9 @@ def wait_for_server(timeout=30):
     return False
 
 def test_ingest():
-    print("\n--- Testing /ingest with sample_notes_biology.txt ---")
-    with open("sample_notes_biology.txt", "rb") as f:
+    print("\n--- Testing /ingest with notes/sample_notes_biology.txt ---")
+    filepath = os.path.join("notes", "sample_notes_biology.txt")
+    with open(filepath, "rb") as f:
         files = {"file": ("sample_notes_biology.txt", f, "text/plain")}
         res = requests.post(f"{BASE_URL}/ingest", files=files)
     print("Status:", res.status_code)
@@ -37,12 +39,13 @@ def test_invalid_ingest():
     print("Status:", res.status_code)
     print("Response:", res.json())
     assert res.status_code == 400
-    assert "Only .txt and .pdf files allowed" in res.json().get("detail", "")
+    assert "Only .txt, .pdf, and .docx files allowed" in res.json().get("detail", "")
     print("Invalid ingest validation passed.")
 
 def test_ingest_pdf():
-    print("\n--- Testing /ingest with sample_lecture_quantum.pdf ---")
-    with open("sample_lecture_quantum.pdf", "rb") as f:
+    print("\n--- Testing /ingest with notes/sample_lecture_quantum.pdf ---")
+    filepath = os.path.join("notes", "sample_lecture_quantum.pdf")
+    with open(filepath, "rb") as f:
         files = {"file": ("sample_lecture_quantum.pdf", f, "application/pdf")}
         res = requests.post(f"{BASE_URL}/ingest", files=files)
     print("Status:", res.status_code)
@@ -99,14 +102,41 @@ def test_ask_out_of_scope_escalation():
     print(f"Result status: {data.get('status')} (Reason: {data.get('reason')})")
     print("Escalation check completed.")
 
+def test_ingest_docx():
+    print("\n--- Testing /ingest with notes/sample_history_renaissance.docx ---")
+    filepath = os.path.join("notes", "sample_history_renaissance.docx")
+    with open(filepath, "rb") as f:
+        files = {"file": ("sample_history_renaissance.docx", f, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
+        res = requests.post(f"{BASE_URL}/ingest", files=files)
+    print("Status:", res.status_code)
+    print("Response:", res.json())
+    assert res.status_code == 200
+    assert res.json().get("status") == "success"
+    assert res.json().get("chunks_loaded") > 0
+    print("DOCX ingest test passed.")
+
+def test_ask_docx():
+    print("\n--- Testing /ask for DOCX content ---")
+    query = "Who invented the movable-type printing press and around what year?"
+    res = requests.post(f"{BASE_URL}/ask", json={"query": query})
+    print("Status:", res.status_code)
+    print("Response:", res.json())
+    data = res.json()
+    assert res.status_code == 200
+    assert data.get("status") == "answered"
+    assert "sample_history_renaissance.docx" in data.get("citations", [])
+    print("DOCX question answered successfully.")
+
 if __name__ == "__main__":
     if not wait_for_server():
         sys.exit(1)
     test_ingest()
     test_ingest_pdf()
+    test_ingest_docx()
     test_invalid_ingest()
     test_ask_valid()
     test_ask_photosynthesis()
     test_ask_pdf()
+    test_ask_docx()
     test_ask_out_of_scope_escalation()
-    print("\n=== ALL TESTS (TXT + PDF + ESCALATION) COMPLETED SUCCESSFULLY ===")
+    print("\n=== ALL TESTS (TXT + PDF + DOCX + ESCALATION) COMPLETED SUCCESSFULLY ===")

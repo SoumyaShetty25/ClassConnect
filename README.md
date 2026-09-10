@@ -1,12 +1,12 @@
 # Academic AI — RAG Backend
 
-A Retrieval-Augmented Generation (RAG) backend designed for academic learning, course notes, and lecture slide Q&A. Students can upload `.txt` and `.pdf` documents, then query them in natural language. The engine retrieves relevant excerpts and generates clean, grounded answers with file citations — or automatically escalates to a teacher when notes do not contain sufficient detail.
+A Retrieval-Augmented Generation (RAG) backend designed for academic learning, course notes, and lecture slide Q&A. Students can upload `.txt`, `.pdf`, and `.docx` documents, then query them in natural language. The engine retrieves relevant excerpts and generates clean, grounded answers with file citations — or automatically escalates to a teacher when notes do not contain sufficient detail.
 
 ---
 
 ## Features
 
-- 📄 **Multi-Format Ingestion**: Upload plain text (`.txt`) notes or multi-page slide decks and papers (`.pdf`).
+- 📄 **Multi-Format Ingestion**: Upload plain text (`.txt`) notes, multi-page slide decks and papers (`.pdf`), or Microsoft Word documents (`.docx`).
 - ⚡ **Lightning Fast & Free**: Powered by `qwen/qwen3.8-27b` on Groq API with near-zero latency.
 - 🎯 **Two-Tier Escalation**:
   1. *Vector Search Threshold*: Escalates queries that have low semantic similarity (`distance > 0.7`).
@@ -71,9 +71,9 @@ python cli.py ask "What is the well-posed learning problem definition?"
 
 ## API Reference
 
-### `POST /ingest` — Upload Notes (.txt or .pdf)
+### `POST /ingest` — Upload Notes (.txt, .pdf, or .docx)
 
-Upload a `.txt` or `.pdf` file to extract text, chunk (500 chars), embed, and store in ChromaDB.
+Upload a `.txt`, `.pdf`, or `.docx` file to extract text, chunk (500 chars), embed, and store in ChromaDB.
 
 ```bash
 # Upload plain text notes
@@ -83,6 +83,10 @@ curl -X POST http://localhost:8000/ingest \
 # Upload PDF slides or lecture notes
 curl -X POST http://localhost:8000/ingest \
   -F "file=@machine_learning_notes.pdf"
+
+# Upload Word documents
+curl -X POST http://localhost:8000/ingest \
+  -F "file=@study_guide.docx"
 ```
 
 **Response:**

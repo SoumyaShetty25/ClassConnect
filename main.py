@@ -5,7 +5,9 @@ import chromadb
 from sentence_transformers import SentenceTransformer
 from langchain_groq import ChatGroq
 from dotenv import load_dotenv
+# pyrefly: ignore [missing-import]
 from pypdf import PdfReader
+import docx
 import uvicorn
 import io
 import os
@@ -54,8 +56,20 @@ async def ingest_file(file: UploadFile = File(...)):
             text = "\n".join(extracted_pages).strip()
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Failed to read PDF file: {str(e)}")
+    elif filename.endswith(".docx"):
+        try:
+            doc = docx.Document(io.BytesIO(content))
+            paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+            for table in doc.tables:
+                for row in table.rows:
+                    row_text = " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
+                    if row_text:
+                        paragraphs.append(row_text)
+            text = "\n".join(paragraphs).strip()
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to read DOCX file: {str(e)}")
     else:
-        raise HTTPException(status_code=400, detail="Only .txt and .pdf files allowed.")
+        raise HTTPException(status_code=400, detail="Only .txt, .pdf, and .docx files allowed.")
     
     if not text.strip():
         raise HTTPException(status_code=400, detail="Uploaded file contains no readable text.")

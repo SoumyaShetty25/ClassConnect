@@ -68,14 +68,16 @@ AcademicAI_RAG/
 - [x] Verify out-of-scope question escalation
 - [x] Verify rejection of unsupported file formats (e.g. `.png` -> 400 Bad Request)
 
-### Phase 4: CLI & Usability Upgrades ✅
+### Phase 4: Document Support, CLI & Usability Upgrades ✅
 - [x] Full PDF ingestion support with page extraction using `pypdf`
+- [x] Microsoft Word document ingestion support using `python-docx` (paragraphs & tables)
 - [x] Created `cli.py` supporting both interactive REPL mode and single-command flags
 - [x] Fixed Windows Command Prompt `cp1252` character encoding compatibility
 - [x] Built two-tier escalation:
   1. *Vector Layer:* Distance threshold > 0.7 triggers automatic escalation
   2. *LLM Layer:* Model detects incomplete/partial context and triggers `ESCALATE:`
 - [x] Built `clean_text()` sanitizer to strip raw markdown codes, asterisks (`**`), backticks, and header hashes for clean academic English
+- [x] Verified automated tests (`test_rag.py`) for `.txt`, `.pdf`, and `.docx`
 - [x] Ingested user's real course notes:
   - `Introduction to Psychology.pdf` (49 chunks)
   - `machine_learning_notes.pdf` (94 chunks)
