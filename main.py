@@ -70,6 +70,18 @@ async def ingest_file(file: UploadFile = File(...)):
     collection.add(ids=ids, documents=chunks, embeddings=embeddings, metadatas=metadatas)
     return {"status": "success", "filename": file.filename, "chunks_loaded": len(chunks)}
 
+import re
+
+def clean_text(text: str) -> str:
+    """Removes markdown bold/italic asterisks, backticks, hashtags, and cleans whitespace."""
+    text = re.sub(r'\*{1,3}(.*?)\*{1,3}', r'\1', text)
+    text = re.sub(r'_{1,3}(.*?)_{1,3}', r'\1', text)
+    text = re.sub(r'^#{1,6}\s*', '', text, flags=re.MULTILINE)
+    text = re.sub(r'`(.*?)`', r'\1', text)
+    text = re.sub(r'^\s*[\*\-]\s+', '• ', text, flags=re.MULTILINE)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
 @app.post("/ask")
 async def ask_question(payload: QueryRequest):
     query_vector = embedder.encode([payload.query]).tolist()
@@ -84,15 +96,44 @@ async def ask_question(payload: QueryRequest):
          return {"status": "escalated_to_teacher", "reason": "Low confidence match."}
          
     context = "\n".join(results["documents"][0])
-    prompt = f"Answer strictly using this context:\n{context}\n\nQuestion: {payload.query}\nAnswer:"
+    prompt = (
+        "You are an academic teaching assistant. Answer the question strictly using only the context provided below.\n"
+        "Guidelines:\n"
+        "1. If the provided context is incomplete or does not contain enough information to fully answer the question, do NOT speculate or produce an incomplete response. Instead, start your response with 'ESCALATE:' followed by a clear, concise explanation of what information is missing.\n"
+        "2. Write in clean, plain academic English. Avoid using markdown formatting tags, asterisks (**), hashtags (#), or code backticks (`). Present your answer in clear, well-structured paragraphs.\n\n"
+        f"Context:\n{context}\n\n"
+        f"Question: {payload.query}\n\n"
+        "Answer:"
+    )
     
-    answer = llm.invoke(prompt)
+    response = llm.invoke(prompt)
+    raw_answer = response.content.strip()
+    
+    # Check if the model flagged insufficient context or requested escalation
+    lower_answer = raw_answer.lower()
+    is_escalated = (
+        raw_answer.upper().startswith("ESCALATE:")
+        or "cannot be derived from the given" in lower_answer
+        or "not possible to" in lower_answer
+        or "insufficient information" in lower_answer
+    )
+    
+    if is_escalated:
+        reason = raw_answer
+        if reason.upper().startswith("ESCALATE:"):
+            reason = reason[len("ESCALATE:"):].strip()
+        return {
+            "status": "escalated_to_teacher",
+            "reason": clean_text(reason),
+            "citations": [results["metadatas"][0][0]["source"]]
+        }
     
     return {
         "status": "answered",
-        "answer": answer.content.strip(),
+        "answer": clean_text(raw_answer),
         "citations": [results["metadatas"][0][0]["source"]]
     }
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
