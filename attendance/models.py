@@ -123,17 +123,37 @@ class FaceRegistrationResponse(BaseModel):
 class AttendanceMatchResult(BaseModel):
     studentId: Optional[str] = None
     studentName: Optional[str] = None
+    rollNumber: Optional[str] = None
     similarity: float
     matched: bool
+
+
+class PresentStudentDetail(BaseModel):
+    studentId: str
+    studentName: str
+    rollNumber: str = ""
+    similarity: float
+
+
+class AbsentStudentDetail(BaseModel):
+    studentId: str
+    studentName: str
+    rollNumber: str = ""
 
 
 class AttendanceMarkResponse(BaseModel):
     lectureId: str
     classId: str
+    lectureName: str
     date: str
     totalFacesDetected: int
+    totalStudents: int
     presentCount: int
+    absentCount: int
     unknownCount: int
+    attendanceRate: float
+    presentStudents: list[PresentStudentDetail]
+    absentStudents: list[AbsentStudentDetail]
     results: list[AttendanceMatchResult]
 
 
@@ -141,6 +161,30 @@ class AttendanceRecordResponse(BaseModel):
     lectureId: str
     classId: str
     className: Optional[str] = None
+    lectureName: str = "Lecture"
     date: str
-    presentStudentIds: list[str]
-    unknownFaceCount: int
+    totalStudents: int = 0
+    presentCount: int = 0
+    absentCount: int = 0
+    attendanceRate: float = 0.0
+    presentStudentIds: list[str] = []
+    presentStudents: list[PresentStudentDetail] = []
+    absentStudents: list[AbsentStudentDetail] = []
+    unknownFaceCount: int = 0
+
+
+class StudentLectureRecord(BaseModel):
+    lectureId: str
+    lectureName: str
+    className: Optional[str] = None
+    date: str
+    status: str  # "Present" or "Absent"
+    similarity: Optional[float] = None
+
+
+class StudentAttendanceSummary(BaseModel):
+    totalLectures: int
+    attended: int
+    absent: int
+    attendancePercentage: float
+    lectures: list[StudentLectureRecord]

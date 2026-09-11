@@ -237,7 +237,7 @@ async def create_class(
 
 @router.get("/classes", response_model=list[ClassResponse])
 async def list_classes(
-    admin: dict = Depends(require_role("admin")),
+    admin: dict = Depends(require_role("admin", "teacher")),
 ):
     """List all classes."""
     db = get_db()

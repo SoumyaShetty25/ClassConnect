@@ -63,17 +63,38 @@ export default function FaceRegistrationPage() {
 
   const startCamera = useCallback(async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }
-      });
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }
+        });
+      } catch {
+        // Retry with relaxed constraints if specific ones fail
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      }
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        // Ensure the video element starts playing
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current.play().catch(() => {});
+        };
+        // Also try play() directly in case metadata already loaded
+        try { await videoRef.current.play(); } catch { /* will play on loadedmetadata */ }
       }
       setCameraActive(true);
       setError("");
-    } catch {
-      setError("Camera access denied. Please allow camera permissions.");
+    } catch (err) {
+      console.error("Camera error:", err);
+      if (err.name === "NotAllowedError") {
+        setError("Camera access denied. Please allow camera permissions in your browser settings.");
+      } else if (err.name === "NotFoundError") {
+        setError("No camera found. Please connect a webcam and try again.");
+      } else if (err.name === "NotReadableError") {
+        setError("Camera is in use by another application. Please close other apps using the camera and try again.");
+      } else {
+        setError(`Camera error: ${err.message || "Unknown error"}. Please check your camera connection.`);
+      }
     }
   }, []);
 
@@ -88,6 +109,11 @@ export default function FaceRegistrationPage() {
   useEffect(() => {
     return () => { stopCamera(); };
   }, [stopCamera]);
+
+  // Auto-start camera on mount
+  useEffect(() => {
+    startCamera();
+  }, [startCamera]);
 
   const captureFrame = useCallback(() => {
     if (!videoRef.current || !canvasRef.current) return;
@@ -281,14 +307,15 @@ export default function FaceRegistrationPage() {
                 {/* Video */}
                 <div style={{
                   position: "relative", borderRadius: 20, overflow: "hidden",
-                  marginBottom: 20, background: "#000",
+                  marginBottom: 20, background: "#000", minHeight: 300,
                 }}>
                   <video
                     ref={videoRef}
                     autoPlay
                     playsInline
                     muted
-                    style={{ width: "100%", display: "block", borderRadius: 20, transform: "scaleX(-1)" }}
+                    onCanPlay={(e) => { e.target.play().catch(() => {}); }}
+                    style={{ width: "100%", height: "auto", minHeight: 300, display: "block", borderRadius: 20, transform: "scaleX(-1)", objectFit: "cover" }}
                   />
                 </div>
 
