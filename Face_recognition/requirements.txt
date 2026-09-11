@@ -1,0 +1,15 @@
+# ============================================================
+# requirements.txt — AI Classroom Face Recognition System
+# ============================================================
+
+# Core face analysis (RetinaFace detection + ArcFace embeddings)
+insightface>=0.7.3
+
+# ONNX Runtime for model inference (CPU).
+# If you have a CUDA-capable GPU, replace with: onnxruntime-gpu>=1.16.0
+onnxruntime>=1.16.0
+
+# Image I/O and processing
+opencv-python>=4.8.0
+numpy>=1.24.0
+Pillow>=10.0.0

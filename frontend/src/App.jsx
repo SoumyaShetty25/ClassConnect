@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { Routes, Route, Navigate } from "react-router-dom";
 import {
   GraduationCap, Upload, Send, BookOpen, AlertTriangle, Zap,
   SkipForward, Flame, MessageCircle, Brain, ShieldAlert,
@@ -6,6 +7,11 @@ import {
   Server, XCircle, User, Sparkles, Bell, Search, Star,
   ArrowRight, ArrowUpRight, BookMarked, Compass, Award, Check,
 } from "lucide-react";
+import LoginPage from "./pages/LoginPage";
+import ChangePasswordPage from "./pages/ChangePasswordPage";
+import FaceRegistrationPage from "./pages/FaceRegistrationPage";
+import DashboardPage from "./pages/DashboardPage";
+import ProtectedRoute from "./components/ProtectedRoute";
 
 const API = "http://localhost:8000";
 
@@ -328,8 +334,8 @@ function ChatBubble({ msg }) {
   );
 }
 
-/* ════════════════ MAIN APPLICATION ════════════════ */
-export default function App() {
+/* ════════════════ RAG APPLICATION (original UI) ════════════════ */
+function RagApp() {
   const [userRole, setUserRole] = useState("Teacher");
   const [activeTab, setActiveTab] = useState("upload");
   const [chatHistory, setChatHistory] = useState([]);
@@ -2241,5 +2247,26 @@ export default function App() {
         </div>
       </main>
     </div>
+  );
+}
+
+/* ════════════════ ROOT APP WITH ROUTING ════════════════ */
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/change-password" element={
+        <ProtectedRoute><ChangePasswordPage /></ProtectedRoute>
+      } />
+      <Route path="/face-registration" element={
+        <ProtectedRoute><FaceRegistrationPage /></ProtectedRoute>
+      } />
+      <Route path="/dashboard" element={
+        <ProtectedRoute><DashboardPage /></ProtectedRoute>
+      } />
+      <Route path="/app" element={<RagApp />} />
+      <Route path="/" element={<Navigate to="/login" replace />} />
+      <Route path="*" element={<Navigate to="/login" replace />} />
+    </Routes>
   );
 }

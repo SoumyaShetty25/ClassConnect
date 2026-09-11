@@ -347,6 +347,36 @@ async def root():
 
 
 # ---------------------------------------------------------------------------
+# Attendance Module — routers + MongoDB lifecycle
+# ---------------------------------------------------------------------------
+from contextlib import asynccontextmanager
+
+from attendance.database import connect_db, close_db
+from attendance.router_auth import router as auth_router
+from attendance.router_admin import router as admin_router
+from attendance.router_registration import router as registration_router
+from attendance.router_attendance import router as attendance_router
+
+
+# Register routers
+app.include_router(auth_router)
+app.include_router(admin_router)
+app.include_router(registration_router)
+app.include_router(attendance_router)
+
+
+# MongoDB lifecycle events
+@app.on_event("startup")
+async def startup_db():
+    await connect_db()
+
+
+@app.on_event("shutdown")
+async def shutdown_db():
+    await close_db()
+
+
+# ---------------------------------------------------------------------------
 # Run
 # ---------------------------------------------------------------------------
 

@@ -1,5 +1,6 @@
 # ---- Secrets ----
 .env
+admin_token.txt
 
 # ---- Persistent Vector DB ----
 chroma_db/
