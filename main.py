@@ -59,6 +59,7 @@ app.add_middleware(
 # Persistent local ChromaDB — survives server restarts
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
 collection = chroma_client.get_or_create_collection(name="classconnect_notes")
+pyq_collection = chroma_client.get_or_create_collection(name="classconnect_pyqs")
 
 # Embedding model (downloads ~130 MB on first run, cached after)
 embedder = SentenceTransformer("BAAI/bge-small-en-v1.5")
@@ -106,8 +107,8 @@ def call_groq(messages: list[dict], json_mode: bool = False) -> str:
             kwargs = {
                 "model": GROQ_MODEL,
                 "messages": messages,
-                "temperature": 0.3,
-                "max_tokens": 600,
+                "temperature": 0.4,
+                "max_tokens": 1200,
             }
             if json_mode:
                 kwargs["response_format"] = {"type": "json_object"}
@@ -117,6 +118,8 @@ def call_groq(messages: list[dict], json_mode: bool = False) -> str:
             return extract_llm_text(raw)
         except Exception as e:
             print(f"[WARN] Groq API call failed: {e}. Using simulated fallback.")
+    else:
+        print("[WARN] Groq API key is a placeholder — returning static fallback. Set a real key in .env")
 
     if json_mode:
         return json.dumps({
@@ -265,14 +268,15 @@ async def ask_socratic(payload: SocraticRequest):
 async def triage(payload: TriageRequest):
     """
     Emergency Academic Triage.
-    - Queries ChromaDB using weak_topics to pull relevant syllabus context.
-    - Calls Groq in JSON mode to generate a Minimum Viable Study Plan.
+    - Queries ChromaDB notes collection for syllabus context.
+    - Queries ChromaDB PYQ collection for past exam patterns.
+    - Calls Groq in JSON mode to generate a PYQ-informed study plan.
     """
 
     if not payload.weak_topics:
         raise HTTPException(status_code=400, detail="Please provide at least one weak topic.")
 
-    # Query ChromaDB for each weak topic, gather unique context chunks
+    # Query course notes for each weak topic
     all_chunks = []
     seen_ids = set()
 
@@ -287,35 +291,66 @@ async def triage(payload: TriageRequest):
                     seen_ids.add(chunk_id)
                     all_chunks.append(doc)
 
-    if not all_chunks:
+    # Query PYQ collection for past exam question patterns
+    pyq_chunks = []
+    pyq_seen = set()
+
+    for topic in payload.weak_topics:
+        topic_embedding = embedder.encode([topic]).tolist()
+        try:
+            pyq_results = pyq_collection.query(query_embeddings=topic_embedding, n_results=3)
+            if pyq_results["documents"][0]:
+                for i, doc in enumerate(pyq_results["documents"][0]):
+                    chunk_id = pyq_results["ids"][0][i] if pyq_results["ids"][0] else f"pyq_{topic}_{i}"
+                    if chunk_id not in pyq_seen:
+                        pyq_seen.add(chunk_id)
+                        pyq_chunks.append(doc)
+        except Exception:
+            pass  # PYQ collection may be empty
+
+    if not all_chunks and not pyq_chunks:
         return {
             "status": "error",
-            "message": "No course notes found. Please upload PDF notes first.",
+            "message": "No course notes or PYQs found. Please upload PDF notes first.",
         }
 
-    context = "\n---\n".join(all_chunks)
+    notes_context = "\n---\n".join(all_chunks) if all_chunks else "No course notes available."
+    pyq_context = "\n---\n".join(pyq_chunks) if pyq_chunks else ""
 
-    # Triage prompt (exact spec) — JSON mode
+    # Build PYQ-enhanced triage prompt
+    system_prompt = (
+        f"You are an Emergency Academic Triage AI. The student has an exam in "
+        f"{payload.hours_left} hours for {payload.subject}. "
+    )
+
+    if pyq_context:
+        system_prompt += (
+            f"You have access to both course notes AND previous year exam questions (PYQs). "
+            f"Use the PYQ patterns to identify which topics are MOST LIKELY to appear on the exam. "
+            f"Prioritize topics that appeared in past exams as HIGH YIELD. "
+            f"Output a JSON object with exactly 4 keys: "
+            f"'high_yield_core' (topics to spend 70% of time on — prioritize PYQ-frequent topics, list of strings), "
+            f"'quick_wins' (easy marks from definitions/formulas that appeared in PYQs, list of strings), "
+            f"'skip_list' (low priority topics not seen in PYQs, list of strings), "
+            f"'pyq_insights' (2-4 observations about exam patterns from PYQs, list of strings)."
+        )
+    else:
+        system_prompt += (
+            f"Based ONLY on the provided course notes context, generate a Minimum Viable Study Plan. "
+            f"Output a JSON object with exactly 3 keys: "
+            f"'high_yield_core' (topics to spend 70% of time on, list of strings), "
+            f"'quick_wins' (easy definitions, list of strings), "
+            f"'skip_list' (low priority, list of strings)."
+        )
+
+    user_content = f"Course notes context:\n{notes_context}\n\n"
+    if pyq_context:
+        user_content += f"Previous Year Exam Questions (PYQs):\n{pyq_context}\n\n"
+    user_content += f"Weak topics the student identified: {', '.join(payload.weak_topics)}"
+
     messages = [
-        {
-            "role": "system",
-            "content": (
-                f"You are an Emergency Academic Triage AI. The student has an exam in "
-                f"{payload.hours_left} hours for {payload.subject}. Based ONLY on the "
-                f"provided course notes context, generate a Minimum Viable Study Plan. "
-                f"Output a JSON object with exactly 3 keys: "
-                f"'high_yield_core' (topics to spend 70% of time on, list of strings), "
-                f"'quick_wins' (easy definitions, list of strings), "
-                f"'skip_list' (low priority, list of strings)."
-            ),
-        },
-        {
-            "role": "user",
-            "content": (
-                f"Course notes context:\n{context}\n\n"
-                f"Weak topics the student identified: {', '.join(payload.weak_topics)}"
-            ),
-        },
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content},
     ]
 
     raw_json = call_groq(messages, json_mode=True)
@@ -327,7 +362,6 @@ async def triage(payload: TriageRequest):
     try:
         study_plan = json.loads(raw_json)
     except json.JSONDecodeError:
-        # If JSON parsing fails, return raw text as fallback
         return {
             "status": "success",
             "study_plan": raw_json,
@@ -339,6 +373,7 @@ async def triage(payload: TriageRequest):
         "subject": payload.subject,
         "hours_left": payload.hours_left,
         "study_plan": study_plan,
+        "has_pyq_data": len(pyq_chunks) > 0,
     }
 
 
@@ -367,13 +402,17 @@ from attendance.router_auth import router as auth_router
 from attendance.router_admin import router as admin_router
 from attendance.router_registration import router as registration_router
 from attendance.router_attendance import router as attendance_router
+from attendance.router_notes import router as notes_router, init_notes_router
 
+# Initialize notes router with shared resources
+init_notes_router(embedder, collection, pyq_collection)
 
 # Register routers
 app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(registration_router)
 app.include_router(attendance_router)
+app.include_router(notes_router)
 
 
 # MongoDB lifecycle events

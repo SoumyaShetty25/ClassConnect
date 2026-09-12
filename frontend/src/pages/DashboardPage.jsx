@@ -5,6 +5,7 @@ import {
   Users, UserPlus, GraduationCap, BookOpen, Upload, Camera,
   CheckCircle2, XCircle, LogOut, Loader2, Plus, Eye, Clock,
   Shield, School, CalendarCheck, ChevronRight, Search,
+  Download, Trash2, Sparkles,
 } from "lucide-react";
 
 const T = {
@@ -419,6 +420,7 @@ function TeacherDashboard({ authFetch }) {
   const tabs = [
     { id: "mark", label: "📸 Mark Attendance", icon: Camera },
     { id: "tracker", label: "📊 Attendance Tracker", icon: CalendarCheck },
+    { id: "notes", label: "📚 Course Notes & PYQs", icon: BookOpen },
   ];
 
   return (
@@ -800,9 +802,507 @@ function TeacherDashboard({ authFetch }) {
               </div>
             </>
           )}
+
+          {/* ══════ TAB 3: COURSE NOTES & PYQs ══════ */}
+          {activeTab === "notes" && (
+            <NotesManager
+              authFetch={authFetch}
+              role="teacher"
+              selectedClass={selectedClass}
+              classes={classes}
+            />
+          )}
         </>
       )}
     </>
+  );
+}
+
+/* ═══════════════ NOTES & PYQ MANAGER COMPONENT ═══════════════ */
+function NotesManager({ authFetch, role = "student", selectedClass = "", classes = [] }) {
+  const [notes, setNotes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filterType, setFilterType] = useState("all");
+  const [search, setSearch] = useState("");
+  const [showUpload, setShowUpload] = useState(false);
+  const [uploadFile, setUploadFile] = useState(null);
+  const [uploadTitle, setUploadTitle] = useState("");
+  const [uploadType, setUploadType] = useState("notes");
+  const [uploadClassId, setUploadClassId] = useState(selectedClass || "");
+  const [isUploading, setIsUploading] = useState(false);
+  const [msg, setMsg] = useState({ error: "", success: "" });
+
+  const fetchNotes = useCallback(async () => {
+    setLoading(true);
+    try {
+      let url = "/notes";
+      const params = new URLSearchParams();
+      if (filterType !== "all") params.append("type", filterType);
+      if (search.trim()) params.append("search", search.trim());
+      if (params.toString()) url += `?${params.toString()}`;
+
+      const res = await authFetch(url);
+      if (res.ok) {
+        setNotes(await res.json());
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  }, [authFetch, filterType, search]);
+
+  useEffect(() => {
+    fetchNotes();
+  }, [fetchNotes]);
+
+  useEffect(() => {
+    if (selectedClass) {
+      setUploadClassId(selectedClass);
+    }
+  }, [selectedClass]);
+
+  const handleFileChange = (e) => {
+    const f = e.target.files?.[0];
+    if (f) {
+      setUploadFile(f);
+      if (!uploadTitle) {
+        setUploadTitle(f.name.replace(/\.pdf$/i, "").replace(/[-_]/g, " "));
+      }
+    }
+  };
+
+  const handleUploadSubmit = async (e) => {
+    e.preventDefault();
+    if (!uploadFile) {
+      setMsg({ error: "Please choose a PDF file to upload.", success: "" });
+      return;
+    }
+    if (!uploadFile.name.toLowerCase().endsWith(".pdf")) {
+      setMsg({ error: "Only PDF files are supported.", success: "" });
+      return;
+    }
+
+    setIsUploading(true);
+    setMsg({ error: "", success: "" });
+
+    try {
+      const fd = new FormData();
+      fd.append("file", uploadFile);
+      fd.append("title", uploadTitle);
+      fd.append("type", uploadType);
+      if (uploadClassId) fd.append("classId", uploadClassId);
+
+      const res = await authFetch("/notes/upload", {
+        method: "POST",
+        body: fd,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to upload document");
+      }
+
+      const data = await res.json();
+      setMsg({ error: "", success: `Successfully indexed "${data.title}" (${data.chunkCount} chunks into ${uploadType === 'pyq' ? 'PYQ database' : 'Course Notes database'})!` });
+      setUploadFile(null);
+      setUploadTitle("");
+      setShowUpload(false);
+      fetchNotes();
+    } catch (err) {
+      setMsg({ error: err.message, success: "" });
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleDownload = async (noteId, filename) => {
+    try {
+      const res = await authFetch(`/notes/${noteId}/download`);
+      if (!res.ok) throw new Error("Download failed");
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename || "document.pdf";
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (e) {
+      alert("Could not download file: " + e.message);
+    }
+  };
+
+  const handleDelete = async (noteId, title) => {
+    if (!window.confirm(`Are you sure you want to delete "${title}"? This will also remove all its chunks from the AI search index.`)) {
+      return;
+    }
+    try {
+      const res = await authFetch(`/notes/${noteId}`, { method: "DELETE" });
+      if (res.ok) {
+        fetchNotes();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.detail || "Failed to delete");
+      }
+    } catch (e) {
+      alert("Error deleting file: " + e.message);
+    }
+  };
+
+  const formatBytes = (bytes) => {
+    if (!bytes || bytes === 0) return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
+  };
+
+  const notesCount = notes.filter(n => n.type === "notes").length;
+  const pyqCount = notes.filter(n => n.type === "pyq").length;
+
+  return (
+    <div className="anim-fade-in" style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      {/* Header & Controls Card */}
+      <div style={{
+        background: T.white, borderRadius: 24, padding: "24px 28px",
+        boxShadow: T.shadowCard, border: `1px solid ${T.borderLight}`,
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 16, marginBottom: 20 }}>
+          <div>
+            <h3 style={{ fontSize: 20, fontWeight: 800, color: T.textPrimary, margin: 0, letterSpacing: "-0.01em" }}>
+              📚 Course Notes & Previous Year Questions (PYQs)
+            </h3>
+            <p style={{ fontSize: 13, color: T.textSecondary, marginTop: 4, margin: "4px 0 0" }}>
+              Browse syllabus materials, lecture notes, and past examination papers indexed for AI study and triage.
+            </p>
+          </div>
+
+          {(role === "teacher" || role === "admin") && (
+            <button
+              onClick={() => setShowUpload(!showUpload)}
+              style={{
+                ...pill, padding: "10px 18px", fontSize: 13, cursor: "pointer", border: "none",
+                fontFamily: "inherit", background: showUpload ? T.charcoal : T.lavender.card,
+                color: showUpload ? T.charcoalText : T.lavender.text,
+                boxShadow: T.shadowCard, transition: "all 0.2s ease",
+              }}
+            >
+              {showUpload ? <XCircle size={15} /> : <Plus size={15} />}
+              {showUpload ? "Cancel Upload" : "Upload Document / PYQ"}
+            </button>
+          )}
+        </div>
+
+        {/* Upload Form Card */}
+        {showUpload && (role === "teacher" || role === "admin") && (
+          <form onSubmit={handleUploadSubmit} className="anim-fade-in" style={{
+            padding: 22, borderRadius: 20, background: T.lavender.soft,
+            border: `1.5px solid ${T.lavender.border}`, marginBottom: 24,
+            display: "flex", flexDirection: "column", gap: 16,
+          }}>
+            <div style={{ fontSize: 15, fontWeight: 800, color: T.lavender.text, display: "flex", alignItems: "center", gap: 8 }}>
+              <Upload size={18} /> Upload Academic Document (PDF)
+            </div>
+
+            {msg.error && (
+              <div style={{ padding: "10px 14px", borderRadius: 12, background: T.rose.card, border: `1px solid ${T.rose.border}`, color: T.rose.text, fontSize: 12, fontWeight: 600 }}>
+                {msg.error}
+              </div>
+            )}
+            {msg.success && (
+              <div style={{ padding: "10px 14px", borderRadius: 12, background: T.mint.card, border: `1px solid ${T.mint.border}`, color: T.mint.text, fontSize: 12, fontWeight: 600 }}>
+                {msg.success}
+              </div>
+            )}
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
+              <div>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: T.textMuted, marginBottom: 6, textTransform: "uppercase" }}>
+                  Document Type *
+                </label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => setUploadType("notes")}
+                    style={{
+                      flex: 1, padding: "9px 12px", borderRadius: 12, fontSize: 12, fontWeight: 700,
+                      border: uploadType === "notes" ? `2px solid ${T.lavender.dark}` : `1px solid ${T.borderLight}`,
+                      background: uploadType === "notes" ? T.lavender.card : T.white,
+                      color: uploadType === "notes" ? T.lavender.text : T.textSecondary,
+                      cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                    }}
+                  >
+                    <BookOpen size={14} /> Course Notes
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUploadType("pyq")}
+                    style={{
+                      flex: 1, padding: "9px 12px", borderRadius: 12, fontSize: 12, fontWeight: 700,
+                      border: uploadType === "pyq" ? `2px solid ${T.yellow.dark}` : `1px solid ${T.borderLight}`,
+                      background: uploadType === "pyq" ? T.yellow.card : T.white,
+                      color: uploadType === "pyq" ? T.yellow.text : T.textSecondary,
+                      cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                    }}
+                  >
+                    <Sparkles size={14} /> PYQ (Past Papers)
+                  </button>
+                </div>
+                <div style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>
+                  {uploadType === "pyq" ? "Used by Exam Triage to identify high-yield questions!" : "Used by Socratic Tutor for questions & concepts."}
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: T.textMuted, marginBottom: 6, textTransform: "uppercase" }}>
+                  Document Title (Optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Unit 3 Neural Networks or 2025 Midterm PYQ"
+                  value={uploadTitle}
+                  onChange={e => setUploadTitle(e.target.value)}
+                  style={{
+                    width: "100%", padding: "10px 14px", fontSize: 13, fontFamily: "inherit",
+                    borderRadius: 12, border: `1.5px solid ${T.borderLight}`, background: T.white,
+                    color: T.textPrimary, outline: "none", boxSizing: "border-box",
+                  }}
+                />
+              </div>
+
+              {classes.length > 0 && (
+                <div>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: T.textMuted, marginBottom: 6, textTransform: "uppercase" }}>
+                    Associated Class (Optional)
+                  </label>
+                  <select
+                    value={uploadClassId}
+                    onChange={e => setUploadClassId(e.target.value)}
+                    style={{
+                      width: "100%", padding: "10px 14px", fontSize: 13, fontFamily: "inherit",
+                      borderRadius: 12, border: `1.5px solid ${T.borderLight}`, background: T.white,
+                      color: T.textPrimary, outline: "none", boxSizing: "border-box", cursor: "pointer",
+                    }}
+                  >
+                    <option value="">-- General / All Classes --</option>
+                    {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: T.textMuted, marginBottom: 6, textTransform: "uppercase" }}>
+                Choose PDF File *
+              </label>
+              <input
+                type="file"
+                accept=".pdf,application/pdf"
+                onChange={handleFileChange}
+                style={{
+                  width: "100%", padding: "10px 14px", fontSize: 13, fontFamily: "inherit",
+                  borderRadius: 12, border: `1.5px dashed ${T.lavender.border}`, background: T.white,
+                  color: T.textPrimary, cursor: "pointer", boxSizing: "border-box",
+                }}
+              />
+              {uploadFile && (
+                <div style={{ fontSize: 12, color: T.mint.text, marginTop: 4, fontWeight: 600 }}>
+                  Selected: {uploadFile.name} ({formatBytes(uploadFile.size)})
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button
+                type="submit"
+                disabled={isUploading || !uploadFile}
+                style={{
+                  ...pill, padding: "11px 24px", fontSize: 13, cursor: isUploading || !uploadFile ? "not-allowed" : "pointer",
+                  border: "none", fontFamily: "inherit", background: T.lavender.dark, color: T.white,
+                  opacity: isUploading || !uploadFile ? 0.6 : 1, boxShadow: "0 4px 14px rgba(104,72,152,0.3)",
+                }}
+              >
+                {isUploading ? <Loader2 size={15} className="spinner" /> : <Upload size={15} />}
+                {isUploading ? "Extracting & Indexing Chunks..." : `Upload & Index ${uploadType === "pyq" ? "PYQ" : "Notes"}`}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {/* Filter Toolbar */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", gap: 6, background: "#F5F0FB", padding: 4, borderRadius: 14 }}>
+            {[
+              { key: "all", label: "All Documents", count: notes.length },
+              { key: "notes", label: "📖 Notes", count: notesCount },
+              { key: "pyq", label: "📝 Past Papers (PYQ)", count: pyqCount },
+            ].map(item => (
+              <button
+                key={item.key}
+                onClick={() => setFilterType(item.key)}
+                style={{
+                  ...pill, padding: "6px 14px", fontSize: 12, cursor: "pointer", border: "none",
+                  fontFamily: "inherit",
+                  background: filterType === item.key ? T.white : "transparent",
+                  color: filterType === item.key ? T.textPrimary : T.textSecondary,
+                  boxShadow: filterType === item.key ? "0 2px 8px rgba(0,0,0,0.06)" : "none",
+                  fontWeight: filterType === item.key ? 700 : 500,
+                }}
+              >
+                {item.label} ({item.count})
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, maxWidth: 300, minWidth: 200 }}>
+            <div style={{
+              display: "flex", alignItems: "center", gap: 8, width: "100%",
+              padding: "8px 14px", borderRadius: 12, background: "#FAF7FD",
+              border: `1.5px solid ${T.borderLight}`,
+            }}>
+              <Search size={14} color={T.textMuted} />
+              <input
+                type="text"
+                placeholder="Search documents..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                style={{
+                  border: "none", background: "transparent", fontSize: 13, fontFamily: "inherit",
+                  color: T.textPrimary, outline: "none", width: "100%",
+                }}
+              />
+              {search && (
+                <button onClick={() => setSearch("")} style={{ border: "none", background: "transparent", cursor: "pointer", color: T.textMuted }}>
+                  <XCircle size={14} />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Document List */}
+      <div style={{
+        background: T.white, borderRadius: 24, boxShadow: T.shadowCard,
+        border: `1px solid ${T.borderLight}`, overflow: "hidden",
+      }}>
+        <div style={{ padding: "18px 24px", borderBottom: `1px solid ${T.borderLight}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: T.textPrimary }}>
+            Available Learning Materials ({notes.length})
+          </div>
+          {loading && <Loader2 size={16} className="spinner" color={T.textMuted} />}
+        </div>
+
+        {notes.length === 0 && !loading && (
+          <div style={{ padding: 48, textAlign: "center" }}>
+            <BookOpen size={42} color={T.textMuted} style={{ marginBottom: 14, opacity: 0.6 }} />
+            <div style={{ fontSize: 15, fontWeight: 700, color: T.textPrimary, marginBottom: 4 }}>No documents found</div>
+            <div style={{ fontSize: 13, color: T.textMuted, maxWidth: 400, margin: "0 auto" }}>
+              {role === "teacher" || role === "admin"
+                ? "Click 'Upload Document / PYQ' above to upload course notes or previous year question papers for this class."
+                : "Your teacher has not uploaded any notes or PYQ papers yet. Check back soon!"}
+            </div>
+          </div>
+        )}
+
+        {notes.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {notes.map((doc, idx) => {
+              const isPYQ = doc.type === "pyq";
+              const typeBadge = isPYQ
+                ? { bg: T.yellow.card, border: T.yellow.border, text: T.yellow.text, label: "PYQ Paper", icon: Sparkles }
+                : { bg: T.lavender.card, border: T.lavender.border, text: T.lavender.text, label: "Course Notes", icon: BookOpen };
+              const BadgeIcon = typeBadge.icon;
+
+              return (
+                <div
+                  key={doc.noteId || idx}
+                  style={{
+                    padding: "18px 24px",
+                    borderBottom: idx === notes.length - 1 ? "none" : `1px solid ${T.borderLight}`,
+                    display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap",
+                    gap: 16, transition: "background 0.15s ease",
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = "#FAF7FD"}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 16, flex: 1, minWidth: 260 }}>
+                    <div style={{
+                      width: 44, height: 44, borderRadius: 14,
+                      background: typeBadge.bg, border: `1px solid ${typeBadge.border}`,
+                      display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                    }}>
+                      <BadgeIcon size={20} color={typeBadge.text} />
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 15, fontWeight: 700, color: T.textPrimary }}>
+                          {doc.title}
+                        </span>
+                        <span style={{
+                          ...pill, padding: "2px 8px", fontSize: 10.5,
+                          background: typeBadge.bg, color: typeBadge.text, border: `1px solid ${typeBadge.border}`,
+                        }}>
+                          {typeBadge.label}
+                        </span>
+                        {doc.className && (
+                          <span style={{
+                            ...pill, padding: "2px 8px", fontSize: 10.5,
+                            background: T.mint.card, color: T.mint.text,
+                          }}>
+                            {doc.className}
+                          </span>
+                        )}
+                      </div>
+
+                      <div style={{ display: "flex", alignItems: "center", gap: 14, fontSize: 12, color: T.textMuted, flexWrap: "wrap" }}>
+                        <span>📄 {doc.filename}</span>
+                        <span>📦 {formatBytes(doc.fileSizeBytes)}</span>
+                        <span>🧩 {doc.chunkCount || 0} AI chunks</span>
+                        <span>👤 {doc.uploaderName}</span>
+                        <span>🕒 {doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleDateString() : "Recently"}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <button
+                      onClick={() => handleDownload(doc.noteId, doc.filename)}
+                      style={{
+                        ...pill, padding: "8px 14px", fontSize: 12, cursor: "pointer",
+                        border: `1.5px solid ${T.lavender.border}`, background: T.white, color: T.lavender.dark,
+                        display: "flex", alignItems: "center", gap: 6, fontFamily: "inherit",
+                        transition: "all 0.15s ease",
+                      }}
+                      title="Download PDF"
+                    >
+                      <Download size={13} /> Download PDF
+                    </button>
+
+                    {(role === "teacher" || role === "admin") && (
+                      <button
+                        onClick={() => handleDelete(doc.noteId, doc.title)}
+                        style={{
+                          ...pill, padding: "8px 10px", fontSize: 12, cursor: "pointer",
+                          border: `1px solid ${T.rose.border}`, background: T.rose.card, color: T.rose.text,
+                          display: "flex", alignItems: "center", gap: 4, fontFamily: "inherit",
+                        }}
+                        title="Delete Document"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -810,6 +1310,7 @@ function TeacherDashboard({ authFetch }) {
 function StudentDashboard({ authFetch }) {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [studentTab, setStudentTab] = useState("attendance");
 
   useEffect(() => {
     authFetch("/attendance/my-records").then(async r => {
@@ -817,138 +1318,181 @@ function StudentDashboard({ authFetch }) {
     }).catch(() => {}).finally(() => setLoading(false));
   }, [authFetch]);
 
-  if (loading) {
-    return <div style={{ padding: 48, textAlign: "center" }}><Loader2 size={24} className="spinner" color={T.textMuted} /></div>;
-  }
-
-  if (!summary || summary.totalLectures === 0) {
-    return (
-      <div style={{
-        background: T.white, borderRadius: 24, padding: 48,
-        boxShadow: T.shadowCard, border: `1px solid ${T.borderLight}`,
-        textAlign: "center",
-      }}>
-        <CalendarCheck size={48} color={T.textMuted} style={{ marginBottom: 16 }} />
-        <div style={{ fontSize: 16, fontWeight: 700, color: T.textPrimary, marginBottom: 6 }}>No attendance records yet</div>
-        <div style={{ fontSize: 13, color: T.textMuted }}>Your teacher hasn't recorded any lectures yet. Check back later!</div>
-      </div>
-    );
-  }
-
-  const pct = summary.attendancePercentage;
-  const onTrack = pct >= 75;
-  const statusColor = onTrack ? T.mint : T.rose;
-  // SVG circular progress
-  const radius = 52;
-  const circumference = 2 * Math.PI * radius;
-  const dashOffset = circumference - (pct / 100) * circumference;
-
   return (
     <>
-      {/* Summary card */}
-      <div style={{
-        background: T.white, borderRadius: 24, padding: 28,
-        boxShadow: T.shadowCard, border: `1px solid ${T.borderLight}`, marginBottom: 24,
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 32, flexWrap: "wrap" }}>
-          {/* Circular progress */}
-          <div style={{ position: "relative", width: 128, height: 128, flexShrink: 0 }}>
-            <svg width="128" height="128" viewBox="0 0 128 128">
-              <circle cx="64" cy="64" r={radius} fill="none" stroke={T.borderLight} strokeWidth="10" />
-              <circle cx="64" cy="64" r={radius} fill="none" stroke={statusColor.text}
-                strokeWidth="10" strokeLinecap="round"
-                strokeDasharray={circumference} strokeDashoffset={dashOffset}
-                transform="rotate(-90 64 64)"
-                style={{ transition: "stroke-dashoffset 0.8s ease" }}
-              />
-            </svg>
-            <div style={{
-              position: "absolute", inset: 0, display: "flex", flexDirection: "column",
-              alignItems: "center", justifyContent: "center",
+      {/* Student Tab Switcher */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 24 }}>
+        {[
+          { id: "attendance", label: "📊 My Attendance", icon: CalendarCheck },
+          { id: "notes", label: "📚 Course Notes & PYQs", icon: BookOpen },
+        ].map(t => {
+          const Icon = t.icon;
+          const active = studentTab === t.id;
+          return (
+            <button key={t.id} onClick={() => setStudentTab(t.id)} style={{
+              flex: 1, padding: "14px 20px", fontSize: 14, fontWeight: 700, fontFamily: "inherit",
+              borderRadius: 16, border: active ? `2px solid ${T.lavender.dark}` : `1.5px solid ${T.borderLight}`,
+              background: active ? T.lavender.card : T.white, color: active ? T.lavender.text : T.textSecondary,
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              transition: "all 0.2s ease", boxShadow: active ? T.shadowCard : "none",
             }}>
-              <div style={{ fontSize: 28, fontWeight: 800, color: T.textPrimary }}>{pct}%</div>
-              <div style={{ fontSize: 10, fontWeight: 600, color: T.textMuted, textTransform: "uppercase" }}>Attendance</div>
+              <Icon size={16} /> {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {studentTab === "notes" && (
+        <NotesManager authFetch={authFetch} role="student" />
+      )}
+
+      {studentTab === "attendance" && (
+        <>
+          {loading && (
+            <div style={{ padding: 48, textAlign: "center" }}><Loader2 size={24} className="spinner" color={T.textMuted} /></div>
+          )}
+
+          {!loading && (!summary || summary.totalLectures === 0) && (
+            <div style={{
+              background: T.white, borderRadius: 24, padding: 48,
+              boxShadow: T.shadowCard, border: `1px solid ${T.borderLight}`,
+              textAlign: "center",
+            }}>
+              <CalendarCheck size={48} color={T.textMuted} style={{ marginBottom: 16 }} />
+              <div style={{ fontSize: 16, fontWeight: 700, color: T.textPrimary, marginBottom: 6 }}>No attendance records yet</div>
+              <div style={{ fontSize: 13, color: T.textMuted }}>Your teacher hasn't recorded any lectures yet. Check back later!</div>
             </div>
-          </div>
+          )}
 
-          {/* KPIs */}
-          <div style={{ flex: 1, display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
-            {[
-              { label: "Total Lectures", value: summary.totalLectures, icon: "📚", bg: T.lavender.card, color: T.lavender.text },
-              { label: "Attended", value: summary.attended, icon: "✅", bg: T.mint.card, color: T.mint.text },
-              { label: "Missed", value: summary.absent, icon: "❌", bg: T.rose.card, color: T.rose.text },
-            ].map((m, i) => (
-              <div key={i} style={{
-                padding: "18px 16px", borderRadius: 18, background: m.bg,
-                textAlign: "center",
+          {!loading && summary && summary.totalLectures > 0 && (
+            <>
+              {/* Summary card */}
+              <div style={{
+                background: T.white, borderRadius: 24, padding: 28,
+                boxShadow: T.shadowCard, border: `1px solid ${T.borderLight}`, marginBottom: 24,
               }}>
-                <div style={{ fontSize: 22, marginBottom: 6 }}>{m.icon}</div>
-                <div style={{ fontSize: 24, fontWeight: 800, color: m.color }}>{m.value}</div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: T.textMuted, marginTop: 4, textTransform: "uppercase" }}>{m.label}</div>
-              </div>
-            ))}
-          </div>
-        </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 32, flexWrap: "wrap" }}>
+                  {/* Circular progress */}
+                  <div style={{ position: "relative", width: 128, height: 128, flexShrink: 0 }}>
+                    {(() => {
+                      const pct = summary.attendancePercentage;
+                      const onTrack = pct >= 75;
+                      const statusColor = onTrack ? T.mint : T.rose;
+                      const radius = 52;
+                      const circumference = 2 * Math.PI * radius;
+                      const dashOffset = circumference - (pct / 100) * circumference;
 
-        {/* Status badge */}
-        <div style={{ marginTop: 20, display: "flex", justifyContent: "center" }}>
-          <span style={{
-            ...pill, padding: "10px 24px", fontSize: 14,
-            background: statusColor.card, color: statusColor.text,
-            boxShadow: `0 4px 12px ${onTrack ? "rgba(29, 82, 67, 0.12)" : "rgba(134, 39, 37, 0.12)"}`,
-          }}>
-            {onTrack ? "✅ On Track — Attendance ≥ 75%" : "⚠️ Low Attendance Warning — Below 75%"}
-          </span>
-        </div>
-      </div>
+                      return (
+                        <>
+                          <svg width="128" height="128" viewBox="0 0 128 128">
+                            <circle cx="64" cy="64" r={radius} fill="none" stroke={T.borderLight} strokeWidth="10" />
+                            <circle cx="64" cy="64" r={radius} fill="none" stroke={statusColor.text}
+                              strokeWidth="10" strokeLinecap="round"
+                              strokeDasharray={circumference} strokeDashoffset={dashOffset}
+                              transform="rotate(-90 64 64)"
+                              style={{ transition: "stroke-dashoffset 0.8s ease" }}
+                            />
+                          </svg>
+                          <div style={{
+                            position: "absolute", inset: 0, display: "flex", flexDirection: "column",
+                            alignItems: "center", justifyContent: "center",
+                          }}>
+                            <div style={{ fontSize: 28, fontWeight: 800, color: T.textPrimary }}>{pct}%</div>
+                            <div style={{ fontSize: 10, fontWeight: 600, color: T.textMuted, textTransform: "uppercase" }}>Attendance</div>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
 
-      {/* Lecture timeline */}
-      <div style={{
-        background: T.white, borderRadius: 24, boxShadow: T.shadowCard,
-        border: `1px solid ${T.borderLight}`, overflow: "hidden",
-      }}>
-        <div style={{ padding: "20px 24px", borderBottom: `1px solid ${T.borderLight}` }}>
-          <h3 style={{ fontSize: 16, fontWeight: 800, color: T.textPrimary, margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
-            <CalendarCheck size={18} color={T.lavender.dark} /> Lecture Attendance History
-          </h3>
-        </div>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead>
-              <tr style={{ borderBottom: `1px solid ${T.borderLight}` }}>
-                {["Lecture Topic", "Class", "Date", "Status", "Confidence"].map(h => (
-                  <th key={h} style={{ padding: "12px 16px", textAlign: "left", fontWeight: 700, color: T.textMuted, fontSize: 11, textTransform: "uppercase" }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {summary.lectures.map(l => {
-                const isPresent = l.status === "Present";
-                return (
-                  <tr key={l.lectureId} style={{ borderBottom: `1px solid ${T.borderLight}` }}>
-                    <td style={{ padding: "14px 16px", fontWeight: 700, color: T.textPrimary }}>{l.lectureName}</td>
-                    <td style={{ padding: "14px 16px", color: T.textSecondary }}>{l.className || "—"}</td>
-                    <td style={{ padding: "14px 16px", color: T.textSecondary }}>{l.date?.split("T")[0] || l.date}</td>
-                    <td style={{ padding: "14px 16px" }}>
-                      <span style={{
-                        ...pill,
-                        background: isPresent ? T.mint.card : T.rose.card,
-                        color: isPresent ? T.mint.text : T.rose.text,
+                  {/* KPIs */}
+                  <div style={{ flex: 1, display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
+                    {[
+                      { label: "Total Lectures", value: summary.totalLectures, icon: "📚", bg: T.lavender.card, color: T.lavender.text },
+                      { label: "Attended", value: summary.attended, icon: "✅", bg: T.mint.card, color: T.mint.text },
+                      { label: "Missed", value: summary.absent, icon: "❌", bg: T.rose.card, color: T.rose.text },
+                    ].map((m, i) => (
+                      <div key={i} style={{
+                        padding: "18px 16px", borderRadius: 18, background: m.bg,
+                        textAlign: "center",
                       }}>
-                        {isPresent ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
-                        {l.status}
+                        <div style={{ fontSize: 22, marginBottom: 6 }}>{m.icon}</div>
+                        <div style={{ fontSize: 24, fontWeight: 800, color: m.color }}>{m.value}</div>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: T.textMuted, marginTop: 4, textTransform: "uppercase" }}>{m.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Status badge */}
+                <div style={{ marginTop: 20, display: "flex", justifyContent: "center" }}>
+                  {(() => {
+                    const onTrack = summary.attendancePercentage >= 75;
+                    const statusColor = onTrack ? T.mint : T.rose;
+                    return (
+                      <span style={{
+                        ...pill, padding: "10px 24px", fontSize: 14,
+                        background: statusColor.card, color: statusColor.text,
+                        boxShadow: `0 4px 12px ${onTrack ? "rgba(29, 82, 67, 0.12)" : "rgba(134, 39, 37, 0.12)"}`,
+                      }}>
+                        {onTrack ? "✅ On Track — Attendance ≥ 75%" : "⚠️ Low Attendance Warning — Below 75%"}
                       </span>
-                    </td>
-                    <td style={{ padding: "14px 16px", color: T.textSecondary }}>
-                      {l.similarity != null ? `${(l.similarity * 100).toFixed(1)}%` : "—"}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* Lecture timeline */}
+              <div style={{
+                background: T.white, borderRadius: 24, boxShadow: T.shadowCard,
+                border: `1px solid ${T.borderLight}`, overflow: "hidden",
+              }}>
+                <div style={{ padding: "20px 24px", borderBottom: `1px solid ${T.borderLight}` }}>
+                  <h3 style={{ fontSize: 16, fontWeight: 800, color: T.textPrimary, margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                    <CalendarCheck size={18} color={T.lavender.dark} /> Lecture Attendance History
+                  </h3>
+                </div>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ borderBottom: `1px solid ${T.borderLight}` }}>
+                        {["Lecture Topic", "Class", "Date", "Status", "Confidence"].map(h => (
+                          <th key={h} style={{ padding: "12px 16px", textAlign: "left", fontWeight: 700, color: T.textMuted, fontSize: 11, textTransform: "uppercase" }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {summary.lectures.map(l => {
+                        const isPresent = l.status === "Present";
+                        return (
+                          <tr key={l.lectureId} style={{ borderBottom: `1px solid ${T.borderLight}` }}>
+                            <td style={{ padding: "14px 16px", fontWeight: 700, color: T.textPrimary }}>{l.lectureName}</td>
+                            <td style={{ padding: "14px 16px", color: T.textSecondary }}>{l.className || "—"}</td>
+                            <td style={{ padding: "14px 16px", color: T.textSecondary }}>{l.date?.split("T")[0] || l.date}</td>
+                            <td style={{ padding: "14px 16px" }}>
+                              <span style={{
+                                ...pill,
+                                background: isPresent ? T.mint.card : T.rose.card,
+                                color: isPresent ? T.mint.text : T.rose.text,
+                              }}>
+                                {isPresent ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
+                                {l.status}
+                              </span>
+                            </td>
+                            <td style={{ padding: "14px 16px", color: T.textSecondary }}>
+                              {l.similarity != null ? `${(l.similarity * 100).toFixed(1)}%` : "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
+        </>
+      )}
     </>
   );
 }

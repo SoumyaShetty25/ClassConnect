@@ -2239,6 +2239,47 @@ function RagApp() {
                         </div>
                       </div>
                     </div>
+
+                    {/* 4. Past Exam Patterns (PYQ Insights) */}
+                    {triagePlan.pyq_insights && triagePlan.pyq_insights.length > 0 && (
+                      <div
+                        style={{
+                          gridColumn: "1 / -1",
+                          background: T.yellow.card,
+                          border: `1.5px solid ${T.yellow.border}`,
+                          borderRadius: 24,
+                          padding: 24,
+                          boxShadow: T.shadowCard,
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                          <div style={{ width: 36, height: 36, borderRadius: 10, background: "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                            <Sparkles size={18} color={T.yellow.dark} />
+                          </div>
+                          <div>
+                            <h4 style={{ fontSize: 16, fontWeight: 800, color: T.yellow.text, margin: 0 }}>
+                              📝 Past Year Examination (PYQ) Trend Analysis
+                            </h4>
+                            <span style={{ fontSize: 12, color: T.yellow.dark, fontWeight: 600 }}>
+                              Cross-referenced with uploaded PYQ papers
+                            </span>
+                          </div>
+                        </div>
+
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
+                          {triagePlan.pyq_insights.map((insight, idx) => (
+                            <div key={idx} style={{
+                              padding: "12px 16px", borderRadius: 14, background: "#FFFFFF",
+                              border: `1px solid ${T.yellow.border}`, fontSize: 13, color: T.yellow.text,
+                              lineHeight: 1.5, fontWeight: 600, display: "flex", alignItems: "flex-start", gap: 8,
+                            }}>
+                              <span style={{ color: T.yellow.dark, fontWeight: 800 }}>✦</span>
+                              <span>{insight}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
